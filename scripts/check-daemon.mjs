@@ -1,6 +1,6 @@
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
@@ -8,10 +8,13 @@ import { Registry } from "../server/registry.ts";
 import { Store } from "../server/store.ts";
 import { connectLocalDaemon } from "../server/daemon.ts";
 
+const source = process.argv[2] || "github:Daaaaave/paseo-telegram";
+if (!/^(?:npm:|github:|git:)/.test(source))
+  throw new Error(
+    "Use a managed Git or npm source; preparation must not modify a development checkout.",
+  );
 const exec = promisify(execFile),
   home = await mkdtemp(join(tmpdir(), "paseo-telegram-daemon-check-"));
-const input = process.argv[2] || ".";
-const source = /^(?:npm:|github:|git:)/.test(input) ? input : resolve(input);
 const env = { ...process.env };
 for (const name of Object.keys(env))
   if (name.startsWith("PASEO_")) delete env[name];
