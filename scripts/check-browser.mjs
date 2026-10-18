@@ -36,25 +36,40 @@ const chrome = spawn(
     "--user-data-dir=" + profile,
     "about:blank",
   ],
-  { stdio: "ignore" },
+  { stdio: ["ignore", "ignore", "pipe"] },
 );
+let startupError;
+let startupLog = "";
+chrome.on("error", (error) => {
+  startupError = error;
+});
+chrome.stderr.on("data", (chunk) => {
+  startupLog = (startupLog + chunk.toString()).slice(-8000);
+});
 let socket;
 const errors = [];
 try {
   let port;
-  for (let i = 0; i < 100; i++) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (startupError || chrome.exitCode !== null || chrome.signalCode !== null)
+      throw Error(
+        `Browser exited during startup: ${startupError?.message ?? chrome.exitCode ?? chrome.signalCode}\n${startupLog}`,
+      );
     try {
       port = Number(
         (await readFile(join(profile, "DevToolsActivePort"), "utf8")).split(
           "\n",
         )[0],
       );
-      break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 50));
-    }
+      if (Number.isInteger(port) && port > 0 && port <= 65535) break;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 50));
   }
-  if (!port) throw Error("Browser did not start");
+  if (!Number.isInteger(port) || port < 1 || port > 65535)
+    throw Error(
+      `Browser did not become ready within 30 seconds\n${startupLog}`,
+    );
   const targets = await (
     await fetch(`http://127.0.0.1:${port}/json/list`)
   ).json();
