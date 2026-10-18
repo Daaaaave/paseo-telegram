@@ -10,6 +10,8 @@ import { connectLocalDaemon } from "../server/daemon.ts";
 
 const exec = promisify(execFile),
   home = await mkdtemp(join(tmpdir(), "paseo-telegram-daemon-check-"));
+const input = process.argv[2] || ".";
+const source = /^(?:npm:|github:|git:)/.test(input) ? input : resolve(input);
 const env = { ...process.env };
 for (const name of Object.keys(env))
   if (name.startsWith("PASEO_")) delete env[name];
@@ -43,7 +45,7 @@ const store = new Store(
 );
 store.state.pairing = {
   hash: createHash("sha256").update(nonce).digest("hex"),
-  expiresAt: Date.now() + 60_000,
+  expiresAt: Date.now() + 5 * 60_000,
 };
 await store.save();
 await writeFile(
@@ -64,7 +66,8 @@ try {
     [
       "plugin",
       "install",
-      resolve(process.argv[2] || "."),
+      source,
+      ...(process.argv[3] ? ["--ref", process.argv[3]] : []),
       "--home",
       home,
       "--json",
@@ -100,6 +103,8 @@ try {
     throw new Error("Headless receiver status is unhealthy");
   const result = {
     passed: true,
+    source,
+    ...(process.argv[3] ? { ref: process.argv[3] } : {}),
     isolated: true,
     headlessBeforeFirstRpc: true,
     realDaemon: true,

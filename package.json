@@ -1,6 +1,6 @@
 {
   "name": "paseo-telegram",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Connect Telegram DMs, groups and topics to Paseo chats and workspaces, with optional Bots profiles.",
   "license": "MIT",
@@ -9,7 +9,8 @@
     "test": "node --test tests/*.test.ts tests/*.test.mjs",
     "check:package": "node scripts/check-package.mjs",
     "check:browser": "node scripts/check-browser.mjs",
-    "check:daemon": "node scripts/check-daemon.mjs"
+    "check:daemon": "node scripts/check-daemon.mjs",
+    "pack": "node scripts/pack.mjs"
   },
   "dependencies": {
     "@getpaseo/client": "0.11.2",

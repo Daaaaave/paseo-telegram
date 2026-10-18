@@ -18,6 +18,16 @@ paseo plugin add npm:paseo-telegram
 Open **Telegram** in the Paseo sidebar. No additional service, public webhook,
 model API key, or rebuilt app is needed.
 
+Direct Git installation is also supported:
+
+```sh
+paseo plugin add github:Daaaaave/paseo-telegram
+```
+
+Git preparation installs the shrinkwrap's production dependencies with npm,
+without running dependency lifecycle scripts. npm installations use their
+normal dependency acquisition.
+
 ## Connect a bot
 
 1. Create a Telegram bot with [@BotFather](https://t.me/BotFather).
@@ -142,6 +152,7 @@ npm ci --ignore-scripts
 npm run typecheck
 npm test
 npm run check:package
+npm run pack
 ```
 
 The browser check renders the actual cross-platform screen with fixture RPCs
@@ -156,6 +167,18 @@ CHROME_BIN=google-chrome npm run check:browser
 With the Paseo CLI installed, `npm run check:daemon` launches a disposable daemon
 with a simulated Telegram API and proves reception before any app/RPC connects.
 It never uses an existing daemon, bot token, model subscription or customer chat.
+
+Pass an installation source and optional Git revision to verify a clean managed
+installation. For example:
+
+```sh
+npm run check:daemon -- github:Daaaaave/paseo-telegram v0.1.2
+npm run check:daemon -- npm:paseo-telegram@0.1.2
+```
+
+`npm run pack` writes the npm tarball to `.artifacts/`, omitting the Git-only
+preparation command. Stable-tag releases publish that artifact through the
+existing OIDC workflow.
 
 Paseo 0.11 exposes the server API only from RPC/lifecycle callbacks. The small
 `server/daemon.ts` adapter uses the matching, pinned SDK's local connection

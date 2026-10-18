@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2
+
+- Fix Git installation by preparing the locked production dependencies before
+  Paseo compiles the plugin.
+- Pack npm releases from an isolated staging directory without the Git-only
+  preparation command, avoiding a redundant dependency installation.
+- Verify both installation sources with the disposable-daemon check.
+
 ## 0.1.1
 
 - Document the configured GitHub Actions trusted publisher and verify token-free

@@ -5,6 +5,7 @@
   "requirements": {
     "paseo": ">=0.11.2 <0.12.0"
   },
+  "build": [["npm", "ci", "--omit=dev", "--ignore-scripts"]],
   "icon": "assets/icon.png",
   "media": ["assets/desktop.png", "assets/mobile.png"]
 }

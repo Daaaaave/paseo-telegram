@@ -78,6 +78,14 @@ standard package documentation enter the npm artifact. The package check inspect
 that allowlist, local import closure, credential-like strings and dependency
 integrities.
 
+Git installations run the manifest's `npm ci --omit=dev --ignore-scripts`
+preparation command against the committed shrinkwrap before compilation.
+`npm run pack` stages the same published files and omits that Git-only command
+from the npm manifest, because npm acquisition already installs production
+dependencies. Staging never edits the working checkout. Package checks validate
+the Git preparation contract and inspect the staged npm files; the release
+workflow publishes that staged artifact.
+
 GitHub checks and stable version tags drive npm publishing through OIDC. npm's
 Trusted Publisher is configured for `Daaaaave/paseo-telegram` and `publish.yml`.
 The initial publication used interactive npm account authorization. Future

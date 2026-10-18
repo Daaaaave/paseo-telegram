@@ -34,8 +34,6 @@ jobs:
       - run: npm run check:package
       - run: npm audit --omit=dev
       - name: Pack inspected artifact
-        run: |
-          mkdir -p .artifacts
-          npm pack --ignore-scripts --pack-destination .artifacts
+        run: npm run pack
       - name: Publish to npm with OIDC
         run: node scripts/publish.mjs
