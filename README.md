@@ -125,6 +125,10 @@ paseo plugin update telegram
 Updates use Paseo's normal plugin manager. This repository has no host-specific
 deployment, server timers or automatic changes to installed daemons.
 
+Maintainers publish stable `v*` tags through GitHub Actions. npm trusts this
+repository's `publish.yml` workflow through OIDC; no npm publishing token is
+stored in GitHub. Publishing a release does not update anyone's daemon.
+
 Connection data lives under `$PASEO_HOME/plugin-data/telegram` (or
 `~/.paseo/plugin-data/telegram`). Tokens are in separate server-only files;
 private files use mode `0600` and directories `0700` on Unix. Owner pairing stores

@@ -78,9 +78,10 @@ standard package documentation enter the npm artifact. The package check inspect
 that allowlist, local import closure, credential-like strings and dependency
 integrities.
 
-GitHub checks and stable version tags drive npm publishing through OIDC after a
-maintainer configures this repository/workflow as the package's Trusted
-Publisher. Initial publication may need interactive npm account authorization.
+GitHub checks and stable version tags drive npm publishing through OIDC. npm's
+Trusted Publisher is configured for `Daaaaave/paseo-telegram` and `publish.yml`.
+The initial publication used interactive npm account authorization. Future
+versions use the workflow's short-lived OIDC identity without an npm token.
 No workflow connects to an installation or deploys to a daemon. Registry review
 and an installation's update action are separate from npm publication.
 

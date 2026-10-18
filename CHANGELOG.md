@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Document the configured GitHub Actions trusted publisher and verify token-free
+  npm publication. Runtime behavior is unchanged from 0.1.0.
+
 ## 0.1.0
 
 - Connect multiple Telegram bots from a cross-platform Paseo screen.
