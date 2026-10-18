@@ -270,9 +270,13 @@ export class Bridge {
         "sendMessage",
         {
           chat_id: message.chat.id,
-          text: russian(message)
-            ? "Владелец подтверждён. Выберите чат или рабочее пространство в настройках Telegram в Paseo. Теперь вы можете добавлять бота в группы."
-            : "Owner confirmed. Choose a chat or workspace in Paseo’s Telegram settings. You can now add this bot to groups.",
+          text: this.router.target(message)
+            ? russian(message)
+              ? "Владелец подтверждён. Для этого чата уже сохранено назначение Paseo — отправьте сообщение агенту. Используется ваш провайдер или подписка Paseo. Вы можете добавлять бота в группы."
+              : "Owner confirmed. This conversation already has a saved Paseo destination — send a message to the agent. Replies use your Paseo provider or subscription. You can now add this bot to groups."
+            : russian(message)
+              ? "Владелец подтверждён. Для ответов агента нужен сохранённый чат или рабочее пространство. Вернитесь в Paseo → Telegram, выберите назначение и нажмите Save settings. Используется ваш провайдер или подписка Paseo. Вы можете добавлять бота в группы."
+              : "Owner confirmed. Agent replies need a saved chat or workspace. Return to Paseo → Telegram, choose a destination and select Save settings. Replies use your Paseo provider or subscription. You can now add this bot to groups.",
         },
         this.signal,
       );
@@ -292,18 +296,35 @@ export class Bridge {
       return;
     }
     if (!authorized(config, state, message)) return;
+    const setupCommand = /^\/(?:start|status)(?:@(\w+))?(?:\s|$)/i.exec(
+      message.text ?? "",
+    );
+    const addressedSetup =
+      !!setupCommand &&
+      (!setupCommand[1] ||
+        setupCommand[1].toLowerCase() === config.username.toLowerCase()) &&
+      (!isGroup(message.chat) ||
+        !!setupCommand[1] ||
+        isAddressed(message, config.botId, config.username));
     if (
       isGroup(message.chat) &&
       config.policy.invocation === "mentions" &&
+      !addressedSetup &&
       !isAddressed(message, config.botId, config.username)
     )
       return;
-    if (/^\/(?:start|status)(?:@\w+)?(?:\s|$)/.test(message.text ?? "")) {
+    if (addressedSetup) {
       await this.telegram.call(
         "sendMessage",
         {
           chat_id: message.chat.id,
-          text: "Connected to Paseo. Send a message to work with the linked chat. In groups, mention this bot or reply to one of its messages.",
+          text: this.router.target(message)
+            ? russian(message)
+              ? "Готово: для этого чата сохранено назначение Paseo. Отправьте сообщение агенту. В группах упомяните бота или ответьте на его сообщение. Провайдер модели должен работать в Paseo."
+              : "Ready: this conversation has a saved Paseo destination. Send a message to the agent. In groups, mention this bot or reply to one of its messages. The model provider must work in Paseo."
+            : russian(message)
+              ? "Настройка не завершена. Для этого чата не выбрано назначение Paseo. Откройте Paseo → Telegram, выберите чат или рабочее пространство и нажмите Save settings. Пока назначение не сохранено, бот не может передавать запросы агенту."
+              : "Setup incomplete. This conversation has no Paseo destination. Open Paseo → Telegram, choose a chat or workspace and select Save settings. The bot cannot request agent replies until a destination is saved.",
           ...(message.message_thread_id
             ? { message_thread_id: message.message_thread_id }
             : {}),

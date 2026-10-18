@@ -104,6 +104,11 @@ try {
     return r.result.value;
   };
   const wait = () => new Promise((r) => setTimeout(r, 150));
+  const text = () => evaluate(`document.body.textContent`);
+  const navigate = async (query = "") => {
+    await send("Page.navigate", { url: url + query });
+    await new Promise((r) => setTimeout(r, 400));
+  };
   const select = async (label, value) => {
     await evaluate(
       `(()=>{const e=document.querySelector('select[aria-label=${JSON.stringify(label)}]');if(!e)throw Error('Missing select');e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('change',{bubbles:true}));})()`,
@@ -193,6 +198,94 @@ try {
     ".context/ui-check/mobile.png",
     Buffer.from(shot.data, "base64"),
   );
+  // A connected token is not a ready agent; only saved routing activates replies.
+  await navigate("?setup=1");
+  assert.match(await text(), /Choose destination/);
+  assert.match(await text(), /Setup incomplete/);
+  assert.doesNotMatch(await text(), /Ready/);
+  shot = await send("Page.captureScreenshot", { format: "png" });
+  await writeFile(
+    ".context/ui-check/setup-mobile.png",
+    Buffer.from(shot.data, "base64"),
+  );
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 1200,
+    height: 960,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  await wait();
+  assert.equal(
+    await evaluate(`document.documentElement.scrollWidth<=innerWidth`),
+    true,
+  );
+  shot = await send("Page.captureScreenshot", { format: "png" });
+  await writeFile(
+    ".context/ui-check/setup-desktop.png",
+    Buffer.from(shot.data, "base64"),
+  );
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 1,
+    mobile: true,
+  });
+  await wait();
+  await select("Send Telegram messages to", "agent");
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[aria-label="Save settings"]').getAttribute('aria-disabled')`,
+    ),
+    "true",
+  );
+  await select("Paseo chat", "personal");
+  assert.match(await text(), /Destination not saved yet/);
+  assert.doesNotMatch(await text(), /Ready/);
+  await click("Save settings");
+  assert.match(await text(), /Ready/);
+  assert.doesNotMatch(
+    await text(),
+    /Setup incomplete|Destination not saved yet/,
+  );
+
+  // Confirming the owner remains a separate required step, including when a
+  // destination was configured first. Simulate Telegram Start, never a real bot.
+  await navigate("?unpaired=1");
+  assert.match(await text(), /Confirm owner/);
+  assert.doesNotMatch(await text(), /Ready/);
+  await click("Create private setup link");
+  await click("Copy setup link");
+  assert.equal(
+    await evaluate(`globalThis.__copied`),
+    "https://t.me/example_help_bot?start=example",
+  );
+  await evaluate(`globalThis.__confirmOwner()`);
+  await click("Refresh");
+  assert.match(await text(), /Ready/);
+  assert.doesNotMatch(await text(), /Confirm owner|Open Telegram and confirm/);
+
+  await navigate("?overrides=1");
+  assert.match(await text(), /Ready for selected chats/);
+  assert.match(
+    await text(),
+    /only for conversations with their own saved destination/,
+  );
+
+  // Workspace onboarding explains the prerequisite and cannot save a missing model.
+  await navigate("?setup=1&no-providers=1");
+  await select("Send Telegram messages to", "workspace");
+  await select("Workspace", "backend");
+  assert.match(await text(), /No providers are available/);
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[aria-label="Save settings"]').getAttribute('aria-disabled')`,
+    ),
+    "true",
+  );
+  assert.equal(
+    await evaluate(`document.documentElement.scrollWidth<=innerWidth`),
+    true,
+  );
   await send("Page.navigate", { url: url + "?empty=1" });
   await new Promise((r) => setTimeout(r, 350));
   assert.equal(
@@ -201,6 +294,7 @@ try {
     ),
     true,
   );
+  assert.match(await text(), /No bot code or separate hosting is needed/);
   assert.equal(
     await evaluate(
       `document.querySelector('input[aria-label="Bot token"]').type`,
@@ -234,6 +328,11 @@ try {
     phone: [390, 844],
     routingModes: true,
     optionalBots: true,
+    setupReadiness: true,
+    ownerPairing: true,
+    unsavedDestinationInactive: true,
+    perConversationOverrides: true,
+    missingProviderGuidance: true,
     savePayloads: true,
     maskedToken: true,
     noHorizontalOverflow: true,

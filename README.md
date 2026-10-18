@@ -30,12 +30,25 @@ normal dependency acquisition.
 
 ## Connect a bot
 
+A brand-new, otherwise empty BotFather bot works. You do not need to write bot
+code or run a separate Telegram service. You do need a working model provider
+or subscription in Paseo: this connector uses your Paseo agents to answer.
+
 1. Create a Telegram bot with [@BotFather](https://t.me/BotFather).
 2. In Paseo → Telegram, enter a connection name and its bot token.
 3. Create the private setup link, open it with your Telegram account and press
    **Start**. This pairs the owner; the link expires after 30 minutes.
-4. Choose a destination and access policy, then save.
+4. Choose an existing Paseo chat, or a workspace with a provider/model or optional
+   Bots profile. Choose an access policy and select **Save settings**.
 5. Message the bot privately, or add it to a group from the paired account.
+
+Connecting a token starts setup; it does not enable agent replies on its own.
+**Confirm owner** and **Choose destination** show the remaining steps. The
+connection becomes **Ready** after the owner is paired, a destination is saved
+and the receiver is running. This does not test the model's login or subscription;
+the selected agent/provider must already work in Paseo. Unsaved destination
+edits do not change where Telegram messages go. `/start` and `/status` explain
+when the current Telegram conversation still needs a saved destination.
 
 For ordinary group mentions, disable **Group Privacy** in BotFather before
 adding the bot. If privacy changed after joining, remove and re-add it. Inline
@@ -60,6 +73,10 @@ topics discovered by the bot. A group override applies to its topics unless a
 topic has its own override. Changing a destination keeps the old chats and
 worktrees. Profile settings apply when creating new agents; existing agents
 keep their own settings.
+
+You can leave the default empty and save only individual overrides. In that
+case the connection shows **Ready for selected chats**; other conversations
+cannot request agent replies until they have a destination.
 
 Sharing an existing Paseo chat across multiple Telegram conversations requires
 the explicit **Share this history** setting. Otherwise a second conversation is

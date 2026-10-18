@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { TelegramScreen } from "../../client/screen.tsx";
 import { theme } from "./host";
 const id = "12345678-1234-4234-8234-123456789012";
+const params = new URLSearchParams(location.search);
 const connection = {
   config: {
     id,
@@ -45,6 +46,19 @@ const connection = {
     },
   ],
 };
+if (params.has("setup")) (connection.config as any).target = null;
+if (params.has("unpaired")) (connection as any).ownerId = null;
+if (params.has("setup") || params.has("unpaired")) {
+  connection.groups = [];
+  connection.conversations = [];
+}
+if (params.has("overrides")) {
+  (connection.config as any).bindings = { "-100:0": connection.config.target };
+  (connection.config as any).target = null;
+}
+(globalThis as any).__confirmOwner = () => {
+  connection.ownerId = 12345;
+};
 const choices = {
   agents: [
     {
@@ -77,6 +91,7 @@ const choices = {
   botsAvailable: true,
   botsError: null,
 };
+if (params.has("no-providers")) choices.providers = [];
 (globalThis as any).__calls = [];
 const client = {
   rpc: async (contract: any, input: any) => {

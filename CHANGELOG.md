@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4
+
+- Show the remaining owner/destination setup step instead of marking a bot ready
+  as soon as its token connects. Unsaved routing edits remain visibly inactive.
+- Explain first-time setup in the screen, README and catalog overview: a new
+  BotFather bot needs no code, and replies use a working Paseo provider.
+- Make Telegram's start/status replies check the current conversation's saved
+  destination, including individual group/topic overrides.
+
 ## 0.1.3
 
 - Correct the copied project name in the license notice.

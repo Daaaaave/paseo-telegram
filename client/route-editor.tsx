@@ -61,6 +61,14 @@ export function RouteEditor({
       />
       {target?.kind === "agent" && (
         <>
+          {choices.agents.length === 0 && (
+            <Text
+              style={{ color: c.foregroundMuted, fontSize: 13, lineHeight: 21 }}
+            >
+              Create a chat with a working model in Paseo, then select Refresh
+              above to find it here.
+            </Text>
+          )}
           <SettingsSelect
             label="Paseo chat"
             hint="Keeps the same agent, history, model and permissions."
@@ -132,6 +140,19 @@ export function RouteEditor({
           )}
           {custom && (
             <>
+              {choices.providers.length === 0 && (
+                <Text
+                  style={{
+                    color: c.foregroundMuted,
+                    fontSize: 13,
+                    lineHeight: 21,
+                  }}
+                >
+                  No providers are available. Connect a provider or subscription
+                  in Paseo, then select Refresh above. You can also link an
+                  existing chat that already works in Paseo.
+                </Text>
+              )}
               <SettingsSelect
                 label="Provider"
                 value={provider}

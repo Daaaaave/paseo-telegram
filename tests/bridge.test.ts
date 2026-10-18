@@ -319,6 +319,107 @@ test("owner pairing is private, expiring, and consumed exactly once", async () =
   assert.equal(f.store.state.ownerId, 10);
 });
 
+test("Telegram setup commands only invite a request when this conversation has a saved destination", async () => {
+  for (const command of ["/start", "/status"]) {
+    const f = await fixture(config(null));
+    const status = { ...message(10), text: command };
+    await f.bridge.handle({ update_id: 1, message: status });
+    assert.match(
+      String(f.telegram.calls.at(-1)?.payload.text),
+      /Setup incomplete/,
+    );
+    assert.match(
+      String(f.telegram.calls.at(-1)?.payload.text),
+      /Save settings/,
+    );
+    assert.equal(f.sent.length, 0);
+
+    f.connection.bindings["-100:0"] = config().target!;
+    await f.bridge.handle({ update_id: 2, message: status });
+    assert.match(
+      String(f.telegram.calls.at(-1)?.payload.text),
+      /Setup incomplete/,
+    );
+
+    f.connection.bindings["10:0"] = config().target!;
+    await f.bridge.handle({ update_id: 3, message: status });
+    assert.match(String(f.telegram.calls.at(-1)?.payload.text), /Ready/);
+    assert.doesNotMatch(
+      String(f.telegram.calls.at(-1)?.payload.text),
+      /Setup incomplete/,
+    );
+    assert.equal(f.sent.length, 0);
+
+    await f.bridge.handle({
+      update_id: 4,
+      message: {
+        ...message(-100, 8),
+        text: `${command}@demo_help_bot`,
+        entities: [
+          { type: "bot_command", offset: 0, length: command.length + 14 },
+        ],
+      },
+    });
+    assert.match(String(f.telegram.calls.at(-1)?.payload.text), /Ready/);
+    await f.bridge.handle({
+      update_id: 5,
+      message: {
+        ...message(-200, 8),
+        text: `${command}@demo_help_bot`,
+        entities: [
+          { type: "bot_command", offset: 0, length: command.length + 14 },
+        ],
+      },
+    });
+    assert.match(
+      String(f.telegram.calls.at(-1)?.payload.text),
+      /Setup incomplete/,
+    );
+    const replies = f.telegram.calls.length;
+    for (const unauthorized of [
+      { ...message(-999, 8), text: `${command}@demo_help_bot` },
+      { ...message(10, 0, 999), text: command },
+      { ...message(-100, 8), text: `${command}@another_bot` },
+    ]) {
+      await f.bridge.handle({ update_id: 6, message: unauthorized });
+      assert.equal(f.telegram.calls.length, replies);
+    }
+    f.connection.target = config().target;
+    delete f.connection.bindings["10:0"];
+    await f.bridge.handle({
+      update_id: 7,
+      message: { ...message(10), text: command },
+    });
+    assert.match(String(f.telegram.calls.at(-1)?.payload.text), /Ready/);
+    assert.equal(f.sent.length, 0);
+  }
+});
+
+test("owner pairing explains the next setup step based on the saved destination", async () => {
+  for (const target of [null, config().target]) {
+    const f = await fixture(config(target));
+    const nonce = "c".repeat(32);
+    f.store.state.ownerId = null;
+    f.store.state.pairing = {
+      hash: createHash("sha256").update(nonce).digest("hex"),
+      expiresAt: Date.now() + 30_000,
+    };
+    await f.bridge.handle({
+      update_id: 1,
+      message: { ...message(10), text: `/start owner_${nonce}` },
+    });
+    assert.match(
+      String(f.telegram.calls.at(-1)?.payload.text),
+      /Owner confirmed/,
+    );
+    assert.match(
+      String(f.telegram.calls.at(-1)?.payload.text),
+      target ? /already has a saved Paseo destination/ : /Save settings/,
+    );
+    assert.equal(f.sent.length, 0);
+  }
+});
+
 test("a duplicate update never sends the same agent operation twice", async () => {
   const f = await fixture();
   const update = { update_id: 42, message: message() };

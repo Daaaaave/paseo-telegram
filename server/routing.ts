@@ -130,7 +130,7 @@ export class Router {
     const target = job.route ?? this.target(message);
     if (!target)
       throw new UserFacingError(
-        "Choose a Paseo chat or workspace in Telegram settings first",
+        "Setup incomplete. Open Paseo → Telegram, choose a chat or workspace and select Save settings before requesting agent replies.",
       );
     job.route = structuredClone(target);
     const identity = routeIdentity(connection.id, key, target);

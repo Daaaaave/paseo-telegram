@@ -43,6 +43,28 @@ const EMPTY_CHOICES: Choices = {
   botsError: null,
 };
 type Client = Pick<PluginClientContext, "rpc">;
+function connectionStatus(connection: ConnectionView): {
+  label: string;
+  color: "foregroundMuted" | "statusDanger" | "statusWarning" | "statusSuccess";
+} {
+  if (!connection.config.enabled)
+    return { label: "Paused", color: "foregroundMuted" };
+  if (connection.lastError)
+    return { label: "Needs attention", color: "statusDanger" };
+  if (connection.ownerId === null)
+    return { label: "Confirm owner", color: "statusWarning" };
+  if (
+    !connection.config.target &&
+    !Object.keys(connection.config.bindings).length
+  )
+    return { label: "Choose destination", color: "statusWarning" };
+  if (!connection.running)
+    return { label: "Connecting…", color: "foregroundMuted" };
+  return {
+    label: connection.config.target ? "Ready" : "Ready for selected chats",
+    color: "statusSuccess",
+  };
+}
 export function TelegramScreen({
   client,
   ...props
@@ -200,7 +222,7 @@ export function TelegramScreen({
                   options={[
                     ...connections.map((value) => ({
                       value: value.config.id,
-                      label: `@${value.config.username}`,
+                      label: `@${value.config.username} · ${connectionStatus(value).label}`,
                     })),
                     { value: "new", label: "+ Connect another bot" },
                   ]}
@@ -253,23 +275,11 @@ export function TelegramScreen({
                       </Text>
                       <Text
                         style={{
-                          color: value.lastError
-                            ? c.statusDanger
-                            : value.running && value.ownerId
-                              ? c.statusSuccess
-                              : c.foregroundMuted,
+                          color: c[connectionStatus(value).color],
                           fontSize: 11,
                         }}
                       >
-                        {value.lastError
-                          ? "Needs attention"
-                          : !value.config.enabled
-                            ? "Paused"
-                            : !value.ownerId
-                              ? "Pair owner"
-                              : value.running
-                                ? "Connected"
-                                : "Connecting"}
+                        {connectionStatus(value).label}
                       </Text>
                     </Pressable>
                   ))}
@@ -381,8 +391,9 @@ function AddConnection({
             lineHeight: 22,
           }}
         >
-          Link an existing chat, or give each Telegram group and topic its own
-          agent. Bots profiles are optional.
+          A new bot from BotFather is enough. No bot code or separate hosting is
+          needed. Link a Paseo chat, or give each group and topic its own agent.
+          Bots profiles are optional.
         </Text>
       </View>
       <SettingsSection title="1 · Connect your Telegram bot">
@@ -442,8 +453,9 @@ function AddConnection({
           lineHeight: 20,
         }}
       >
-        Next: confirm your Telegram account, choose a Paseo destination, and add
-        the bot to your groups. Polling needs no public URL or webhook.
+        Connecting the token is step 1. Next: confirm your Telegram account,
+        choose a Paseo destination and save. Replies use your existing Paseo
+        provider or subscription. Polling needs no public URL or webhook.
       </Text>
     </View>
   );
@@ -536,6 +548,12 @@ function ConnectionEditor({
   ];
   const target =
     scope === "default" ? draft.target : (draft.bindings[scope] ?? null);
+  const hasSavedDestination =
+    !!connection.config.target ||
+    Object.keys(connection.config.bindings).length > 0;
+  const hasDraftDestination =
+    !!draft.target || Object.keys(draft.bindings).length > 0;
+  const status = connectionStatus(connection);
   const setTarget = (target: Target | null) => {
     if (scope === "default") patch({ target });
     else {
@@ -572,26 +590,30 @@ function ConnectionEditor({
         </View>
         <Text
           style={{
-            color: connection.lastError
-              ? theme.colors.statusDanger
-              : connection.running && connection.ownerId
-                ? theme.colors.statusSuccess
-                : theme.colors.foregroundMuted,
+            color: theme.colors[status.color],
             fontSize: 13,
           }}
         >
-          {!connection.config.enabled
-            ? "Paused"
-            : !connection.ownerId
-              ? "Waiting for owner"
-              : connection.running
-                ? `Connected${connection.queued ? ` · ${connection.queued} queued` : ""}`
-                : "Connecting…"}
+          {status.label}
+          {connection.queued > 0 ? ` · ${connection.queued} queued` : ""}
         </Text>
       </View>
       {!!connection.lastError && (
         <Notice theme={theme} error>
           {connection.lastError}
+        </Notice>
+      )}
+      {!hasSavedDestination && (
+        <Notice theme={theme}>
+          {dirty && hasDraftDestination
+            ? "Destination not saved yet. Complete the destination fields and select Save settings to enable agent replies."
+            : "Setup incomplete. The Telegram token is connected, but this bot has no Paseo destination yet. Choose a chat or workspace below, then select Save settings to enable agent replies."}
+        </Notice>
+      )}
+      {hasSavedDestination && !connection.config.target && (
+        <Notice theme={theme}>
+          Replies are configured only for conversations with their own saved
+          destination. Choose a default below to enable other conversations too.
         </Notice>
       )}
       {connection.ownerId === null && (
@@ -654,8 +676,25 @@ function ConnectionEditor({
           </View>
         </SettingsSection>
       )}
-      <SettingsSection title="Conversation routing">
+      <SettingsSection
+        title={
+          hasSavedDestination
+            ? "Conversation routing"
+            : "3 · Choose a Paseo destination"
+        }
+      >
         <View style={{ gap: 19 }}>
+          <Text
+            style={{
+              color: theme.colors.foregroundMuted,
+              fontSize: 13,
+              lineHeight: 21,
+            }}
+          >
+            An existing chat keeps its model, instructions and permissions. For
+            separate chats in a workspace, choose a provider and model, or an
+            optional Bots profile. The provider must already work in Paseo.
+          </Text>
           {scopes.length > 0 && (
             <SettingsSelect
               label="Configure routing for"

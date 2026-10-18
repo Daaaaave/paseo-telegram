@@ -8,6 +8,12 @@ routes choose ordinary agent configuration or a Bots profile. Bots is a
 server-side adapter, never a mandatory package dependency. This keeps transport,
 routing and agent configuration independent.
 
+Partial connection configuration is valid while setting up a bot: the token,
+owner pairing and saved destination are separate steps. Client readiness uses
+saved configuration, never unsaved form edits. Overrides without a default
+enable only their selected conversations. This is routing readiness, not a
+check of the model provider's login or subscription.
+
 Telegram ownership, access, agent providers/models, Bots profiles, workspaces,
 projects and Git branches come from runtime configuration and Paseo's own
 discovery APIs. The shipped plugin includes no operator identity, customer
