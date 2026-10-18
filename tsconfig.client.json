@@ -1,9 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": [
-      "ES2023"
-    ],
+    "lib": ["ES2023"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
@@ -11,13 +9,7 @@
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
-    "types": [
-      "react"
-    ]
+    "types": ["react"]
   },
-  "include": [
-    "index.client.tsx",
-    "client/**/*.tsx",
-    "shared/**/*.ts"
-  ]
+  "include": ["index.client.tsx", "client/**/*.tsx", "shared/**/*.ts"]
 }

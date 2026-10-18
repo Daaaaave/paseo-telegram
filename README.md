@@ -38,12 +38,12 @@ owners, queues, receipts and conversation mappings.
 
 ## Choose where messages go
 
-| Destination | Behavior |
-| --- | --- |
-| Existing Paseo chat | Uses that exact agent and history. Keeps its model, instructions and permissions. |
-| Workspace | Creates an ordinary agent for each Telegram chat/topic, with separate history. |
-| Workspace + Bots profile | Creates separate chats associated with the chosen Bots profile, using its model, prompt, memory and configured tools. |
-| Workspace + Git worktrees | Creates a separate branch/workspace per conversation in the selected workspace's existing project. |
+| Destination               | Behavior                                                                                                              |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Existing Paseo chat       | Uses that exact agent and history. Keeps its model, instructions and permissions.                                     |
+| Workspace                 | Creates an ordinary agent for each Telegram chat/topic, with separate history.                                        |
+| Workspace + Bots profile  | Creates separate chats associated with the chosen Bots profile, using its model, prompt, memory and configured tools. |
+| Workspace + Git worktrees | Creates a separate branch/workspace per conversation in the selected workspace's existing project.                    |
 
 Set a default destination, then optionally override it for individual groups or
 topics discovered by the bot. A group override applies to its topics unless a

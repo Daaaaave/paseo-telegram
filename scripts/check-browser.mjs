@@ -1,16 +1,246 @@
-import{spawn}from'node:child_process';import{mkdtemp,readFile,writeFile,rm,mkdir}from'node:fs/promises';import{tmpdir}from'node:os';import{join,resolve}from'node:path';import{pathToFileURL}from'node:url';import{once}from'node:events';import assert from'node:assert/strict';
-import {build} from 'esbuild';
-await mkdir('.context',{recursive:true});
-await build({entryPoints:['tests/ui/entry.tsx'],outfile:'.context/preview.js',bundle:true,platform:'browser',format:'iife',jsx:'automatic',define:{'process.env.NODE_ENV':'"production"'},alias:{'react-native':'react-native-web','@getpaseo/plugin/client/ui':resolve('tests/ui/host.tsx'),'@getpaseo/plugin/client/react-native':resolve('tests/ui/host.tsx')}});
-await writeFile('.context/preview.html','<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}html,body,#root{margin:0;width:100%;height:100%;font-family:Arial,sans-serif;background:#141917}#root{display:flex;flex-direction:column}</style></head><body><div id="root"></div><script src="preview.js"></script></body></html>');
-const profile=await mkdtemp(join(tmpdir(),'paseo-telegram-browser-'));
-const chrome=spawn(process.argv[2] || process.env.CHROME_BIN || 'google-chrome',['--headless=new','--no-sandbox','--disable-dev-shm-usage','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:'ignore'});
-let socket;const errors=[];try{let port;for(let i=0;i<100;i++){try{port=Number((await readFile(join(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);break}catch{await new Promise(r=>setTimeout(r,50))}}if(!port)throw Error('Browser did not start');const targets=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json();socket=new WebSocket(targets.find(t=>t.type==='page').webSocketDebuggerUrl);await once(socket,'open');let id=0;const pending=new Map();socket.addEventListener('message',e=>{const d=JSON.parse(e.data);if(d.method==='Runtime.exceptionThrown')errors.push(d.params.exceptionDetails.text);if(d.id&&pending.has(d.id)){const p=pending.get(d.id);pending.delete(d.id);d.error?p.reject(Error(d.error.message)):p.resolve(d.result)}});const send=(method,params={})=>new Promise((resolve,reject)=>{pending.set(++id,{resolve,reject});socket.send(JSON.stringify({id,method,params}))});const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value};const wait=()=>new Promise(r=>setTimeout(r,150));const select=async(label,value)=>{await evaluate(`(()=>{const e=document.querySelector('select[aria-label=${JSON.stringify(label)}]');if(!e)throw Error('Missing select');e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('change',{bubbles:true}));})()`);await wait()};const click=async title=>{await evaluate(`(()=>{const e=[...document.querySelectorAll('[role="button"]')].find(e=>e.textContent===${JSON.stringify(title)});if(!e||e.getAttribute('aria-disabled')==='true')throw Error('Button unavailable: '+${JSON.stringify(title)});e.click();})()`);await wait()};
-await send('Runtime.enable');await send('Emulation.setDeviceMetricsOverride',{width:1200,height:960,deviceScaleFactor:1,mobile:false});const url=pathToFileURL(resolve('.context/preview.html')).href;await send('Page.navigate',{url});await new Promise(r=>setTimeout(r,500));assert.equal(await evaluate(`!!document.querySelector('select[aria-label="Paseo chat"]')`),false);assert.equal(await evaluate(`document.body.textContent.includes('Conversation routing')`),true);await mkdir('.context/ui-check',{recursive:true});let shot=await send('Page.captureScreenshot',{format:'png'});await writeFile('.context/ui-check/desktop.png',Buffer.from(shot.data,'base64'));
-await select('Send Telegram messages to','agent');await select('Paseo chat','personal');await new Promise(r=>setTimeout(r,5500));assert.equal(await evaluate(`document.querySelector('select[aria-label="Paseo chat"]').value`),'personal');await click('Save settings');assert.equal(await evaluate(`globalThis.__calls.filter(c=>c.name==='telegram.save').at(-1).input.target.agentId`),'personal');
-await select('Send Telegram messages to','workspace');await select('Workspace','backend');await select('Settings for new agents','bots');await select('Bots profile','support');await click('Save settings');assert.equal(await evaluate(`globalThis.__calls.filter(c=>c.name==='telegram.save').at(-1).input.target.profile.botId`),'support');
-await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});await wait();assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth`),true);assert.equal(await evaluate(`!!document.querySelector('select[aria-label="Telegram bot"]')`),true);shot=await send('Page.captureScreenshot',{format:'png'});await writeFile('.context/ui-check/mobile.png',Buffer.from(shot.data,'base64'));
-await send('Page.navigate',{url:url+'?empty=1'});await new Promise(r=>setTimeout(r,350));assert.equal(await evaluate(`document.body.textContent.includes('Bring a conversation into Paseo')`),true);assert.equal(await evaluate(`document.querySelector('input[aria-label="Bot token"]').type`),'password');assert.equal(await evaluate(`document.documentElement.scrollWidth<=innerWidth`),true);
-await send('Page.navigate',{url:'data:text/html,'+encodeURIComponent('<html><body style="margin:0"><svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><rect width="128" height="128" rx="28" fill="#229ED9"/><g transform="translate(26 25) scale(3.2)" fill="none" stroke="white" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></g></svg></body></html>')});await wait();const icon=await send('Page.captureScreenshot',{format:'png',clip:{x:0,y:0,width:128,height:128,scale:1}});await writeFile('.context/ui-check/icon.png',Buffer.from(icon.data,'base64'));
-assert.deepEqual(errors,[]);const result={passed:true,desktop:[1200,960],phone:[390,844],routingModes:true,optionalBots:true,savePayloads:true,maskedToken:true,noHorizontalOverflow:true,reactErrors:errors,hostControls:'preview adapters',actualScreen:true};await writeFile('.context/browser-check.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
-}finally{socket?.close();const ended=once(chrome,'exit');chrome.kill('SIGTERM');await Promise.race([ended,new Promise(r=>setTimeout(r,1000))]);if(chrome.exitCode===null)chrome.kill('SIGKILL');await rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100})}
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, writeFile, rm, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { once } from "node:events";
+import assert from "node:assert/strict";
+import { build } from "esbuild";
+await mkdir(".context", { recursive: true });
+await build({
+  entryPoints: ["tests/ui/entry.tsx"],
+  outfile: ".context/preview.js",
+  bundle: true,
+  platform: "browser",
+  format: "iife",
+  jsx: "automatic",
+  define: { "process.env.NODE_ENV": '"production"' },
+  alias: {
+    "react-native": "react-native-web",
+    "@getpaseo/plugin/client/ui": resolve("tests/ui/host.tsx"),
+    "@getpaseo/plugin/client/react-native": resolve("tests/ui/host.tsx"),
+  },
+});
+await writeFile(
+  ".context/preview.html",
+  '<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>*{box-sizing:border-box}html,body,#root{margin:0;width:100%;height:100%;font-family:Arial,sans-serif;background:#141917}#root{display:flex;flex-direction:column}</style></head><body><div id="root"></div><script src="preview.js"></script></body></html>',
+);
+const profile = await mkdtemp(join(tmpdir(), "paseo-telegram-browser-"));
+const chrome = spawn(
+  process.argv[2] || process.env.CHROME_BIN || "google-chrome",
+  [
+    "--headless=new",
+    "--no-sandbox",
+    "--disable-dev-shm-usage",
+    "--remote-debugging-port=0",
+    "--user-data-dir=" + profile,
+    "about:blank",
+  ],
+  { stdio: "ignore" },
+);
+let socket;
+const errors = [];
+try {
+  let port;
+  for (let i = 0; i < 100; i++) {
+    try {
+      port = Number(
+        (await readFile(join(profile, "DevToolsActivePort"), "utf8")).split(
+          "\n",
+        )[0],
+      );
+      break;
+    } catch {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+  if (!port) throw Error("Browser did not start");
+  const targets = await (
+    await fetch(`http://127.0.0.1:${port}/json/list`)
+  ).json();
+  socket = new WebSocket(
+    targets.find((t) => t.type === "page").webSocketDebuggerUrl,
+  );
+  await once(socket, "open");
+  let id = 0;
+  const pending = new Map();
+  socket.addEventListener("message", (e) => {
+    const d = JSON.parse(e.data);
+    if (d.method === "Runtime.exceptionThrown")
+      errors.push(d.params.exceptionDetails.text);
+    if (d.id && pending.has(d.id)) {
+      const p = pending.get(d.id);
+      pending.delete(d.id);
+      d.error ? p.reject(Error(d.error.message)) : p.resolve(d.result);
+    }
+  });
+  const send = (method, params = {}) =>
+    new Promise((resolve, reject) => {
+      pending.set(++id, { resolve, reject });
+      socket.send(JSON.stringify({ id, method, params }));
+    });
+  const evaluate = async (expression) => {
+    const r = await send("Runtime.evaluate", {
+      expression,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    if (r.exceptionDetails) throw Error(JSON.stringify(r.exceptionDetails));
+    return r.result.value;
+  };
+  const wait = () => new Promise((r) => setTimeout(r, 150));
+  const select = async (label, value) => {
+    await evaluate(
+      `(()=>{const e=document.querySelector('select[aria-label=${JSON.stringify(label)}]');if(!e)throw Error('Missing select');e.value=${JSON.stringify(value)};e.dispatchEvent(new Event('change',{bubbles:true}));})()`,
+    );
+    await wait();
+  };
+  const click = async (title) => {
+    await evaluate(
+      `(()=>{const e=[...document.querySelectorAll('[role="button"]')].find(e=>e.textContent===${JSON.stringify(title)});if(!e||e.getAttribute('aria-disabled')==='true')throw Error('Button unavailable: '+${JSON.stringify(title)});e.click();})()`,
+    );
+    await wait();
+  };
+  await send("Runtime.enable");
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 1200,
+    height: 960,
+    deviceScaleFactor: 1,
+    mobile: false,
+  });
+  const url = pathToFileURL(resolve(".context/preview.html")).href;
+  await send("Page.navigate", { url });
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(
+    await evaluate(
+      `!!document.querySelector('select[aria-label="Paseo chat"]')`,
+    ),
+    false,
+  );
+  assert.equal(
+    await evaluate(
+      `document.body.textContent.includes('Conversation routing')`,
+    ),
+    true,
+  );
+  await mkdir(".context/ui-check", { recursive: true });
+  let shot = await send("Page.captureScreenshot", { format: "png" });
+  await writeFile(
+    ".context/ui-check/desktop.png",
+    Buffer.from(shot.data, "base64"),
+  );
+  await select("Send Telegram messages to", "agent");
+  await select("Paseo chat", "personal");
+  await new Promise((r) => setTimeout(r, 5500));
+  assert.equal(
+    await evaluate(
+      `document.querySelector('select[aria-label="Paseo chat"]').value`,
+    ),
+    "personal",
+  );
+  await click("Save settings");
+  assert.equal(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.save').at(-1).input.target.agentId`,
+    ),
+    "personal",
+  );
+  await select("Send Telegram messages to", "workspace");
+  await select("Workspace", "backend");
+  await select("Settings for new agents", "bots");
+  await select("Bots profile", "support");
+  await click("Save settings");
+  assert.equal(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.save').at(-1).input.target.profile.botId`,
+    ),
+    "support",
+  );
+  await send("Emulation.setDeviceMetricsOverride", {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 1,
+    mobile: true,
+  });
+  await wait();
+  assert.equal(
+    await evaluate(`document.documentElement.scrollWidth<=innerWidth`),
+    true,
+  );
+  assert.equal(
+    await evaluate(
+      `!!document.querySelector('select[aria-label="Telegram bot"]')`,
+    ),
+    true,
+  );
+  shot = await send("Page.captureScreenshot", { format: "png" });
+  await writeFile(
+    ".context/ui-check/mobile.png",
+    Buffer.from(shot.data, "base64"),
+  );
+  await send("Page.navigate", { url: url + "?empty=1" });
+  await new Promise((r) => setTimeout(r, 350));
+  assert.equal(
+    await evaluate(
+      `document.body.textContent.includes('Bring a conversation into Paseo')`,
+    ),
+    true,
+  );
+  assert.equal(
+    await evaluate(
+      `document.querySelector('input[aria-label="Bot token"]').type`,
+    ),
+    "password",
+  );
+  assert.equal(
+    await evaluate(`document.documentElement.scrollWidth<=innerWidth`),
+    true,
+  );
+  await send("Page.navigate", {
+    url:
+      "data:text/html," +
+      encodeURIComponent(
+        '<html><body style="margin:0"><svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><rect width="128" height="128" rx="28" fill="#229ED9"/><g transform="translate(26 25) scale(3.2)" fill="none" stroke="white" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></g></svg></body></html>',
+      ),
+  });
+  await wait();
+  const icon = await send("Page.captureScreenshot", {
+    format: "png",
+    clip: { x: 0, y: 0, width: 128, height: 128, scale: 1 },
+  });
+  await writeFile(
+    ".context/ui-check/icon.png",
+    Buffer.from(icon.data, "base64"),
+  );
+  assert.deepEqual(errors, []);
+  const result = {
+    passed: true,
+    desktop: [1200, 960],
+    phone: [390, 844],
+    routingModes: true,
+    optionalBots: true,
+    savePayloads: true,
+    maskedToken: true,
+    noHorizontalOverflow: true,
+    reactErrors: errors,
+    hostControls: "preview adapters",
+    actualScreen: true,
+  };
+  await writeFile(
+    ".context/browser-check.json",
+    JSON.stringify(result, null, 2),
+  );
+  console.log(JSON.stringify(result));
+} finally {
+  socket?.close();
+  const ended = once(chrome, "exit");
+  chrome.kill("SIGTERM");
+  await Promise.race([ended, new Promise((r) => setTimeout(r, 1000))]);
+  if (chrome.exitCode === null) chrome.kill("SIGKILL");
+  await rm(profile, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
+}

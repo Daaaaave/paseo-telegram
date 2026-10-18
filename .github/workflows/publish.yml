@@ -1,7 +1,7 @@
 name: Publish
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
 permissions:
   contents: read
 concurrency:
@@ -20,7 +20,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
           cache-dependency-path: npm-shrinkwrap.json
       - name: Match stable release tag and repository
@@ -38,4 +38,4 @@ jobs:
           mkdir -p .artifacts
           npm pack --ignore-scripts --pack-destination .artifacts
       - name: Publish to npm with OIDC
-        run: npm publish .artifacts/paseo-telegram-*.tgz --access public
+        run: node scripts/publish.mjs

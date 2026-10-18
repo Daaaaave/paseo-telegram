@@ -53,17 +53,17 @@ prefers a visible delivery issue over duplicate code/deployment execution.
 
 ## Authorization boundaries
 
-| Boundary | Enforcement |
-| --- | --- |
-| Paseo operator → settings | Authenticated Paseo plugin RPC; strict input schemas; server-side target checks. |
-| Telegram owner claim | Expiring random nonce, SHA-256 hash, constant-time comparison, one-time consumption. |
-| Group admission | Owner's `my_chat_member` add event; queued work rechecks admission. |
-| Request sender | Owner/operator/everyone policy enforced before agent access and again after queuing. |
-| Conversation history | Per chat/topic routes; global guard requires explicit shared-history opt-in for existing agents. |
-| Clarification answer | Original form, agent, question message, chat and topic must match. |
-| Permissions | Only native question forms are answered from Telegram. Tool/plan approvals remain in Paseo. |
-| Credentials | Server-only token files; sanitized API errors; public progress excludes credential-like strings. |
-| External content | A Telegram request is user input. Quoted third-party content is explicitly identified as untrusted. |
+| Boundary                  | Enforcement                                                                                         |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| Paseo operator → settings | Authenticated Paseo plugin RPC; strict input schemas; server-side target checks.                    |
+| Telegram owner claim      | Expiring random nonce, SHA-256 hash, constant-time comparison, one-time consumption.                |
+| Group admission           | Owner's `my_chat_member` add event; queued work rechecks admission.                                 |
+| Request sender            | Owner/operator/everyone policy enforced before agent access and again after queuing.                |
+| Conversation history      | Per chat/topic routes; global guard requires explicit shared-history opt-in for existing agents.    |
+| Clarification answer      | Original form, agent, question message, chat and topic must match.                                  |
+| Permissions               | Only native question forms are answered from Telegram. Tool/plan approvals remain in Paseo.         |
+| Credentials               | Server-only token files; sanitized API errors; public progress excludes credential-like strings.    |
+| External content          | A Telegram request is user input. Quoted third-party content is explicitly identified as untrusted. |
 
 These are transport boundaries on one trusted host. Agent tool permissions and
 host-user credentials remain Paseo's responsibility. Bots profiles can

@@ -1,11 +1,175 @@
-import React from 'react';
-import {View,Text,TextInput as Input,ScrollView as Scroll,Pressable} from 'react-native';
-export const theme={colors:{surface0:'#141917',surface1:'#1c221f',surface2:'#28332d',border:'#344039',foreground:'#e9eeeb',foregroundMuted:'#9eada4',accent:'#8dc7a5',accentForeground:'#102319',statusSuccess:'#74c997',statusWarning:'#e3bc74',statusDanger:'#ee958b'}};
-export const ScrollView=Scroll;export const TextInput=Input;
-export function Icon({name,size=20,color}:any){return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>}
-export async function copyText(text:string){(globalThis as any).__copied=text;}
-export function ExternalLink({href,children}:any){return <a style={{color:theme.colors.accent,fontSize:13,textDecoration:'none'}} href={href}>{children}</a>}
-export function SettingsSection({title,children}:any){return <View style={{gap:18,paddingBottom:24,borderBottomWidth:1,borderBottomColor:theme.colors.border}}><Text style={{fontSize:15,fontWeight:'600',color:theme.colors.foreground}}>{title}</Text>{children}</View>}
-export function SettingsSelect({label,value,options,onValueChange,hint}:any){return <View style={{gap:8}}><Text style={{fontSize:14,color:theme.colors.foreground,fontWeight:'500'}}>{label}</Text><select aria-label={label} value={value} onChange={e=>onValueChange(e.target.value)} style={{width:'100%',minWidth:0,padding:12,height:44,borderRadius:8,border:'1px solid '+theme.colors.border,background:theme.colors.surface1,color:theme.colors.foreground,fontSize:14}}>{options.map((o:any)=><option key={o.value} value={o.value}>{o.label}</option>)}</select>{hint&&<Text style={{fontSize:12,lineHeight:18,color:theme.colors.foregroundMuted}}>{hint}</Text>}</View>}
-export function SettingsSwitch({label,hint,value,onValueChange}:any){return <View style={{gap:7}}><label style={{display:'flex',gap:12,justifyContent:'space-between',alignItems:'center',color:theme.colors.foreground,fontSize:14}}>{label}<input type="checkbox" checked={value} onChange={e=>onValueChange(e.target.checked)} aria-label={label} style={{width:20,height:20,accentColor:theme.colors.accent}}/></label>{hint&&<Text style={{fontSize:12,lineHeight:18,color:theme.colors.foregroundMuted}}>{hint}</Text>}</View>}
-export function SidebarRow(){return null}
+import React from "react";
+import {
+  View,
+  Text,
+  TextInput as Input,
+  ScrollView as Scroll,
+  Pressable,
+} from "react-native";
+export const theme = {
+  colors: {
+    surface0: "#141917",
+    surface1: "#1c221f",
+    surface2: "#28332d",
+    border: "#344039",
+    foreground: "#e9eeeb",
+    foregroundMuted: "#9eada4",
+    accent: "#8dc7a5",
+    accentForeground: "#102319",
+    statusSuccess: "#74c997",
+    statusWarning: "#e3bc74",
+    statusDanger: "#ee958b",
+  },
+};
+export const ScrollView = Scroll;
+export const TextInput = Input;
+export function Icon({ name, size = 20, color }: any) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={color}
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m22 2-7 20-4-9-9-4Z" />
+      <path d="M22 2 11 13" />
+    </svg>
+  );
+}
+export async function copyText(text: string) {
+  (globalThis as any).__copied = text;
+}
+export function ExternalLink({ href, children }: any) {
+  return (
+    <a
+      style={{
+        color: theme.colors.accent,
+        fontSize: 13,
+        textDecoration: "none",
+      }}
+      href={href}
+    >
+      {children}
+    </a>
+  );
+}
+export function SettingsSection({ title, children }: any) {
+  return (
+    <View
+      style={{
+        gap: 18,
+        paddingBottom: 24,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.border,
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 15,
+          fontWeight: "600",
+          color: theme.colors.foreground,
+        }}
+      >
+        {title}
+      </Text>
+      {children}
+    </View>
+  );
+}
+export function SettingsSelect({
+  label,
+  value,
+  options,
+  onValueChange,
+  hint,
+}: any) {
+  return (
+    <View style={{ gap: 8 }}>
+      <Text
+        style={{
+          fontSize: 14,
+          color: theme.colors.foreground,
+          fontWeight: "500",
+        }}
+      >
+        {label}
+      </Text>
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(e) => onValueChange(e.target.value)}
+        style={{
+          width: "100%",
+          minWidth: 0,
+          padding: 12,
+          height: 44,
+          borderRadius: 8,
+          border: "1px solid " + theme.colors.border,
+          background: theme.colors.surface1,
+          color: theme.colors.foreground,
+          fontSize: 14,
+        }}
+      >
+        {options.map((o: any) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      {hint && (
+        <Text
+          style={{
+            fontSize: 12,
+            lineHeight: 18,
+            color: theme.colors.foregroundMuted,
+          }}
+        >
+          {hint}
+        </Text>
+      )}
+    </View>
+  );
+}
+export function SettingsSwitch({ label, hint, value, onValueChange }: any) {
+  return (
+    <View style={{ gap: 7 }}>
+      <label
+        style={{
+          display: "flex",
+          gap: 12,
+          justifyContent: "space-between",
+          alignItems: "center",
+          color: theme.colors.foreground,
+          fontSize: 14,
+        }}
+      >
+        {label}
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={(e) => onValueChange(e.target.checked)}
+          aria-label={label}
+          style={{ width: 20, height: 20, accentColor: theme.colors.accent }}
+        />
+      </label>
+      {hint && (
+        <Text
+          style={{
+            fontSize: 12,
+            lineHeight: 18,
+            color: theme.colors.foregroundMuted,
+          }}
+        >
+          {hint}
+        </Text>
+      )}
+    </View>
+  );
+}
+export function SidebarRow() {
+  return null;
+}

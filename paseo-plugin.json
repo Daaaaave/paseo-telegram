@@ -6,8 +6,5 @@
     "paseo": ">=0.11.2 <0.12.0"
   },
   "icon": "assets/icon.png",
-  "media": [
-    "assets/desktop.png",
-    "assets/mobile.png"
-  ]
+  "media": ["assets/desktop.png", "assets/mobile.png"]
 }

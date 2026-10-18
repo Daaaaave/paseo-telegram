@@ -1,9 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": [
-      "ES2023"
-    ],
+    "lib": ["ES2023"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
@@ -11,10 +9,7 @@
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
-    "types": [
-      "node",
-      "react"
-    ]
+    "types": ["node", "react"]
   },
   "include": [
     "index.server.ts",
