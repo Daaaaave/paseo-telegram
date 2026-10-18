@@ -64,7 +64,7 @@ try {
     [
       "plugin",
       "install",
-      process.argv[2] || resolve("."),
+      resolve(process.argv[2] || "."),
       "--home",
       home,
       "--json",
