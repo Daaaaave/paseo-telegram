@@ -8,6 +8,12 @@ routes choose ordinary agent configuration or a Bots profile. Bots is a
 server-side adapter, never a mandatory package dependency. This keeps transport,
 routing and agent configuration independent.
 
+Telegram ownership, access, agent providers/models, Bots profiles, workspaces,
+projects and Git branches come from runtime configuration and Paseo's own
+discovery APIs. The shipped plugin includes no operator identity, customer
+credentials or project-specific routing. Publication ownership lives in package
+and repository metadata; it does not supply agent settings or access to a host.
+
 Telegram conversation identities contain the chat ID and thread ID. Internal
 agent/message IDs also include the bot connection ID. Identical Telegram update
 IDs from different bots cannot collide. Group-to-supergroup aliases preserve

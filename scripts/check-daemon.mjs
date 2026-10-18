@@ -8,7 +8,11 @@ import { Registry } from "../server/registry.ts";
 import { Store } from "../server/store.ts";
 import { connectLocalDaemon } from "../server/daemon.ts";
 
-const source = process.argv[2] || "github:Daaaaave/paseo-telegram";
+const packageIdentity = JSON.parse(
+  await readFile(new URL("../package.json", import.meta.url), "utf8"),
+);
+const source =
+  process.argv[2] || `npm:${packageIdentity.name}@${packageIdentity.version}`;
 if (!/^(?:npm:|github:|git:)/.test(source))
   throw new Error(
     "Use a managed Git or npm source; preparation must not modify a development checkout.",

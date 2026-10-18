@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Correct the copied project name in the license notice.
+- Derive the developer acceptance check's default source from package metadata
+  instead of a particular GitHub repository.
+- Runtime behavior and configuration are unchanged from 0.1.2.
+
 ## 0.1.2
 
 - Fix Git installation by preparing the locked production dependencies before
