@@ -89,13 +89,19 @@ try {
         .split("\n")
         .map(JSON.parse);
     } catch {}
-    if (events.some((value) => /Choose a Paseo chat/.test(value.text || "")))
+    if (
+      events.some((value) =>
+        /Choose a Paseo chat|Setup incomplete/.test(value.text || ""),
+      )
+    )
       break;
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   if (
     !events.some((value) => /Owner confirmed/.test(value.text || "")) ||
-    !events.some((value) => /Choose a Paseo chat/.test(value.text || ""))
+    !events.some((value) =>
+      /Choose a Paseo chat|Setup incomplete/.test(value.text || ""),
+    )
   )
     throw new Error(
       "Receiver did not process the fixture before any UI/RPC connection",
