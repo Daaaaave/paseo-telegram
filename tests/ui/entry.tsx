@@ -23,6 +23,7 @@ const connection = {
       git: null,
     },
     policy: {
+      groupAdmission: "owner",
       directMessages: "owner",
       groupUsers: "operators",
       operators: [],
@@ -36,6 +37,7 @@ const connection = {
   lastError: null,
   queued: 0,
   groups: [{ id: "-100", title: "Customer community" }],
+  pendingGroups: [] as { id: string; title: string }[],
   conversations: [
     {
       key: "-100:0",
@@ -46,6 +48,10 @@ const connection = {
     },
   ],
 };
+if (params.has("pending")) {
+  connection.config.policy.groupAdmission = "approval";
+  connection.pendingGroups = [{ id: "-200", title: "New community" }];
+}
 if (params.has("setup")) (connection.config as any).target = null;
 if (params.has("unpaired")) (connection as any).ownerId = null;
 if (params.has("setup") || params.has("unpaired")) {
@@ -118,6 +124,15 @@ const client = {
         url: "https://t.me/example_help_bot?start=example",
         expiresAt: Date.now() + 1800000,
       };
+    if (contract.name === "telegram.review") {
+      const group = connection.pendingGroups.find((g) => g.id === input.chatId);
+      if (!group) throw new Error("No pending group");
+      if (input.approve) connection.groups.push(group);
+      connection.pendingGroups = connection.pendingGroups.filter(
+        (g) => g.id !== input.chatId,
+      );
+      return { approved: input.approve };
+    }
     return {};
   },
 };

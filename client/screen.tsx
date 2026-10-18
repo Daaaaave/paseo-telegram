@@ -22,6 +22,7 @@ import {
   listRpc,
   pairRpc,
   revokeRpc,
+  reviewRpc,
   saveRpc,
   type Choices,
   type ConnectionView,
@@ -627,7 +628,8 @@ function ConnectionEditor({
               }}
             >
               Open the private setup link with your Telegram account and press
-              Start. Only that account can admit this bot to groups.
+              Start. This confirms the connection owner. Choose who can connect
+              groups separately below.
             </Text>
             {pairing ? (
               <>
@@ -676,6 +678,81 @@ function ConnectionEditor({
           </View>
         </SettingsSection>
       )}
+      {connection.config.policy.groupAdmission === "approval" &&
+        connection.pendingGroups.length > 0 && (
+          <SettingsSection title="Groups awaiting approval">
+            <View style={{ gap: 15 }}>
+              <Text
+                style={{
+                  color: theme.colors.foregroundMuted,
+                  fontSize: 12,
+                  lineHeight: 19,
+                }}
+              >
+                Approving connects a group to this bot. Requests still follow
+                your saved user and destination settings. Rejecting makes the
+                bot leave.
+                {dirty
+                  ? " Save or discard your edits before reviewing groups."
+                  : ""}
+                {connection.ownerId === null
+                  ? " Confirm the owner before reviewing groups."
+                  : ""}
+              </Text>
+              {connection.pendingGroups.map((group) => (
+                <View key={group.id} style={{ gap: 10 }}>
+                  <Text
+                    style={{ color: theme.colors.foreground, fontSize: 14 }}
+                  >
+                    {group.title}
+                  </Text>
+                  <View
+                    style={{ flexDirection: "row", gap: 12, flexWrap: "wrap" }}
+                  >
+                    <Button
+                      theme={theme}
+                      title="Approve"
+                      label={`Approve ${group.title}`}
+                      disabled={busy || dirty || connection.ownerId === null}
+                      onPress={() =>
+                        void action(async () => {
+                          await client.rpc(reviewRpc, {
+                            id: draft.id,
+                            chatId: group.id,
+                            approve: true,
+                          });
+                          await refresh();
+                          setSuccess(
+                            "Group approved. Requests follow the saved group policy.",
+                          );
+                        })
+                      }
+                    />
+                    <Button
+                      theme={theme}
+                      title="Reject"
+                      label={`Reject ${group.title}`}
+                      secondary
+                      danger
+                      disabled={busy || dirty || connection.ownerId === null}
+                      onPress={() =>
+                        void action(async () => {
+                          await client.rpc(reviewRpc, {
+                            id: draft.id,
+                            chatId: group.id,
+                            approve: false,
+                          });
+                          await refresh();
+                          setSuccess("Group rejected. The bot has left it.");
+                        })
+                      }
+                    />
+                  </View>
+                </View>
+              ))}
+            </View>
+          </SettingsSection>
+        )}
       <SettingsSection
         title={
           hasSavedDestination
@@ -730,6 +807,42 @@ function ConnectionEditor({
       <SettingsSection title="Who can use the agent?">
         <View style={{ gap: 17 }}>
           <SettingsSelect
+            label="Who can connect groups"
+            value={draft.policy.groupAdmission}
+            options={[
+              { value: "owner", label: "Owner only" },
+              { value: "operators", label: "Owner and allowed users" },
+              { value: "approval", label: "Approve each group in Paseo" },
+              { value: "everyone", label: "Anyone who can add the bot" },
+            ]}
+            hint="Group admission and permission to request work are separate. Existing groups stay admitted until revoked. Pending additions follow the newly saved policy."
+            onValueChange={(groupAdmission) => policy({ groupAdmission })}
+          />
+          {draft.policy.groupAdmission === "approval" && (
+            <Text
+              style={{
+                color: theme.colors.foregroundMuted,
+                fontSize: 12,
+                lineHeight: 19,
+              }}
+            >
+              New groups wait for approval here, including groups added by the
+              owner. The agent cannot receive requests from a pending group.
+            </Text>
+          )}
+          {draft.policy.groupAdmission === "everyone" && (
+            <Text
+              style={{
+                color: theme.colors.foregroundMuted,
+                fontSize: 12,
+                lineHeight: 19,
+              }}
+            >
+              Anyone can connect a group. Only users permitted by the request
+              policy below can use the linked agent and its tools.
+            </Text>
+          )}
+          <SettingsSelect
             label="Direct messages"
             value={draft.policy.directMessages}
             options={[
@@ -744,10 +857,24 @@ function ConnectionEditor({
             value={draft.policy.groupUsers}
             options={[
               { value: "operators", label: "Owner and allowed users" },
+              { value: "admins", label: "Group administrators" },
               { value: "everyone", label: "All group members" },
             ]}
             onValueChange={(groupUsers) => policy({ groupUsers })}
           />
+          {draft.policy.groupUsers === "admins" && (
+            <Text
+              style={{
+                color: theme.colors.foregroundMuted,
+                fontSize: 12,
+                lineHeight: 19,
+              }}
+            >
+              Telegram verifies group administrator roles before work starts.
+              Allowed user IDs do not bypass this policy. The paired owner is
+              always allowed. Unverified users cannot request work.
+            </Text>
+          )}
           <Field
             theme={theme}
             label="Allowed Telegram user IDs"
@@ -777,7 +904,7 @@ function ConnectionEditor({
             error={
               !validOperators ? "Enter numeric Telegram user IDs." : undefined
             }
-            hint="The paired owner is always allowed. These users cannot admit new groups."
+            hint="Used by the Owner and allowed users policies. The paired owner is always allowed to request work. These IDs do not grant Telegram admin rights."
           />
           <SettingsSelect
             label="When to respond in groups"

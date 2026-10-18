@@ -6,6 +6,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 export function Button({
   theme,
   title,
+  label,
   onPress,
   disabled,
   secondary = false,
@@ -13,6 +14,7 @@ export function Button({
 }: {
   theme: PluginTheme;
   title: string;
+  label?: string;
   onPress(): void;
   disabled?: boolean;
   secondary?: boolean;
@@ -22,7 +24,7 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={title}
+      accessibilityLabel={label ?? title}
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}

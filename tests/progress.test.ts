@@ -111,9 +111,10 @@ test("one status message follows the right topic, shows real public activity, an
     advance(15_000);
     await progress.refresh();
     const text = String(telegram.calls.at(-1)!.payload.text);
-    assert.match(text, /15 с/);
-    assert.match(text, /Выполняю проверки/);
+    assert.match(text, /15s/);
+    assert.match(text, /Running checks/);
     assert.match(text, /Проверяю ошибку\./);
+    assert.match(text, /Working/);
     assert.doesNotMatch(text, /PRIVATE_|TOKEN_CANARY/);
     advance(8000);
     await progress.refresh();

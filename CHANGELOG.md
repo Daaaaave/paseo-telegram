@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0
+
+- Configure group admission independently: owner, owner and allowed users,
+  approval in Paseo, or anyone who can add the bot.
+- Review pending groups in Paseo; approval checks membership and rejection makes
+  the bot leave. Pending groups cannot request agent work.
+- Add Telegram group administrator request permissions, verified from Telegram
+  before dispatch and after queuing. Verification failures deny access.
+- Preserve existing access policies and old-client saves during upgrades.
+- Use English for all connector service messages. User and agent content retain
+  their original language.
+
 ## 0.1.4
 
 - Show the remaining owner/destination setup step instead of marking a bot ready

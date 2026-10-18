@@ -6,6 +6,7 @@ export function authorized(
   config: Connection,
   state: State,
   message: TelegramMessage,
+  groupAdmin = false,
 ): boolean {
   const user = message.from;
   if (
@@ -28,6 +29,23 @@ export function authorized(
   return (
     isGroup(message.chat) &&
     !!state.groups[String(message.chat.id)] &&
-    (operator || config.policy.groupUsers === "everyone")
+    (user.id === state.ownerId ||
+      config.policy.groupUsers === "everyone" ||
+      (config.policy.groupUsers === "admins" ? groupAdmin : operator))
   );
+}
+
+export function groupAdmission(
+  config: Connection,
+  state: State,
+  addedBy: number,
+): "admit" | "pending" | "reject" {
+  if (state.ownerId === null || config.policy.groupAdmission === "approval")
+    return "pending";
+  return config.policy.groupAdmission === "everyone" ||
+    addedBy === state.ownerId ||
+    (config.policy.groupAdmission === "operators" &&
+      config.policy.operators.includes(addedBy))
+    ? "admit"
+    : "reject";
 }

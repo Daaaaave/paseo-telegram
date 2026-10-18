@@ -45,6 +45,26 @@ The server uses a separately authenticated local SDK session for startup without
 an app. Lifecycle callbacks follow ZeroSub continuation labels and mark native
 question receipts answered. No model provider is implemented or intercepted.
 
+Admission and request permissions are independent policies. The new admission
+field defaults to owner-only for old and new configurations; legacy settings
+payloads omit it rather than resetting a newer value. Pending approval is not an
+admitted group. Review RPCs require the authenticated Paseo control surface, a
+paired owner and a current pending record. Group mutations and review/revoke
+operations serialize on the shared store while Telegram membership is checked.
+
+The administrators request policy reads Telegram's `getChatAdministrators`
+list instead of accepting a user-provided role or caching positive grants.
+The paired owner remains allowed. Other senders must have an administrator or
+creator entry; operator IDs do not bypass this requirement. Lookup failures
+deny access. Authorization runs before dispatch and again after queuing,
+before clarification responses and before final delivery. Admission changes do
+not implicitly revoke existing groups or stop native agents already running.
+
+Connector-owned service strings use English only. User input, public agent
+commentary, native question content and final answers are transported without
+changing their language. Credential redaction still recognizes sensitive text
+in supported non-English input.
+
 ## Persistence and recovery
 
 All state documents are versioned and schema-validated. Corrupt state fails
@@ -69,7 +89,7 @@ prefers a visible delivery issue over duplicate code/deployment execution.
 | ------------------------- | --------------------------------------------------------------------------------------------------- |
 | Paseo operator → settings | Authenticated Paseo plugin RPC; strict input schemas; server-side target checks.                    |
 | Telegram owner claim      | Expiring random nonce, SHA-256 hash, constant-time comparison, one-time consumption.                |
-| Group admission           | Owner's `my_chat_member` add event; queued work rechecks admission.                                 |
+| Group admission           | Configured add-event policy or explicit Paseo approval; pending groups have no agent access.        |
 | Request sender            | Owner/operator/everyone policy enforced before agent access and again after queuing.                |
 | Conversation history      | Per chat/topic routes; global guard requires explicit shared-history opt-in for existing agents.    |
 | Clarification answer      | Original form, agent, question message, chat and topic must match.                                  |
@@ -116,4 +136,5 @@ Official contracts checked during implementation:
 - [Paseo plugin reference](https://paseo.sh/docs/plugins/reference)
 - [Paseo plugin publishing](https://paseo.sh/docs/plugins/publishing)
 - [Telegram Bot API](https://core.telegram.org/bots/api)
+- [Telegram administrator discovery](https://core.telegram.org/bots/api#getchatadministrators)
 - [Paseo Bots](https://github.com/oliexe/paseo-bots)

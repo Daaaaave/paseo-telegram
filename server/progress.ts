@@ -20,30 +20,16 @@ type Activity =
   | "permission"
   | "error";
 const LABELS = {
-  ru: {
-    queued: "⏳ Запрос принят",
-    working: "Разбираюсь с запросом",
-    read: "📄 Читаю файлы",
-    edit: "🛠 Вношу изменения",
-    search: "🔎 Ищу информацию",
-    test: "🧪 Выполняю проверки",
-    command: "🖥 Выполняю команду",
-    context: "🧩 Обновляю контекст",
-    permission: "⏸ Ожидаю разрешение",
-    error: "⚠️ Проверяю ошибку",
-  },
-  en: {
-    queued: "⏳ Request received",
-    working: "Working on your request",
-    read: "📄 Reading files",
-    edit: "🛠 Making changes",
-    search: "🔎 Looking up information",
-    test: "🧪 Running checks",
-    command: "🖥 Running a command",
-    context: "🧩 Updating context",
-    permission: "⏸ Waiting for permission",
-    error: "⚠️ Checking an error",
-  },
+  queued: "⏳ Request received",
+  working: "Working on your request",
+  read: "📄 Reading files",
+  edit: "🛠 Making changes",
+  search: "🔎 Looking up information",
+  test: "🧪 Running checks",
+  command: "🖥 Running a command",
+  context: "🧩 Updating context",
+  permission: "⏸ Waiting for permission",
+  error: "⚠️ Checking an error",
 };
 
 /** Only public assistant updates are rendered; tool arguments/output never are. */
@@ -79,7 +65,6 @@ export class ProgressMessage {
   private readonly signal: AbortSignal;
   private readonly now: () => number;
   private readonly intervalMs: number;
-  private readonly language: "ru" | "en";
   private activity: Activity = "queued";
   private commentary = "";
   private textId: string | undefined;
@@ -110,9 +95,6 @@ export class ProgressMessage {
     this.signal = options.signal;
     this.now = options.now ?? Date.now;
     this.intervalMs = options.intervalMs ?? 8000;
-    this.language = /\p{Script=Cyrillic}/u.test(options.message.text ?? "")
-      ? "ru"
-      : "en";
     this.job.progress ??= { startedAt: this.now(), attempted: false };
   }
 
@@ -221,12 +203,12 @@ export class ProgressMessage {
     );
     const elapsed =
       seconds < 60
-        ? `${seconds}${this.language === "ru" ? " с" : "s"}`
+        ? `${seconds}s`
         : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
     const title = this.active
-      ? `${["🤔", "💭", "🧠"][this.frame++ % 3]} ${this.language === "ru" ? "Работаю" : "Working"}`
-      : LABELS[this.language].queued;
-    return `${title} · ${elapsed}${this.active ? `\n${LABELS[this.language][this.activity]}` : ""}${this.commentary ? `\n\n${this.commentary}` : ""}`;
+      ? `${["🤔", "💭", "🧠"][this.frame++ % 3]} Working`
+      : LABELS.queued;
+    return `${title} · ${elapsed}${this.active ? `\n${LABELS[this.activity]}` : ""}${this.commentary ? `\n\n${this.commentary}` : ""}`;
   }
   private statusContent(text: string): TelegramText {
     const content = formatReply(text)[0];

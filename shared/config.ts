@@ -51,10 +51,19 @@ export const targetSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
+export const groupAdmissionSchema = z.enum([
+  "owner",
+  "operators",
+  "approval",
+  "everyone",
+]);
 export const policySchema = z
   .object({
+    groupAdmission: groupAdmissionSchema.default("owner"),
     directMessages: z.enum(["owner", "operators", "everyone"]).default("owner"),
-    groupUsers: z.enum(["operators", "everyone"]).default("operators"),
+    groupUsers: z
+      .enum(["operators", "admins", "everyone"])
+      .default("operators"),
     operators: z.array(telegramIdSchema).max(100).default([]),
     invocation: z.enum(["mentions", "all"]).default("mentions"),
   })

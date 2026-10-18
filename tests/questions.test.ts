@@ -26,8 +26,13 @@ const permission = {
 
 test("native question forms become replyable Telegram text with exact option/header mapping", () => {
   const question = questionFrom(permission)!;
-  assert.match(questionText(question, true), /Как добавить LoRA\?/);
-  assert.match(questionText(question, true), /2\) Загрузка/);
+  assert.match(questionText(question), /Как добавить LoRA\?/);
+  assert.match(questionText(question), /2\) Загрузка/);
+  assert.match(questionText(question), /^Clarification:/);
+  assert.match(
+    questionText(question),
+    /Reply to this message with an option number/,
+  );
   assert.deepEqual(questionAnswers(question, "2"), {
     "Question 1": "Загрузка",
   });
@@ -42,6 +47,7 @@ test("native question forms become replyable Telegram text with exact option/hea
       { header: "Size", text: "Размер?", options: [] },
     ],
   };
+  assert.match(questionText(multiple), /one answer per line/);
   assert.deepEqual(questionAnswers(multiple, "1: 1\n2: 512"), {
     "Question 1": "Импорт",
     Size: "512",

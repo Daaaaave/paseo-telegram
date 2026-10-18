@@ -89,14 +89,40 @@ is not automatically broadcast into Telegram.
 
 ## Choose who can use it
 
-Only the paired owner can admit groups by adding the bot. The bot leaves groups
-added by someone else. You can revoke admitted groups from the settings screen.
+Group admission and permission to request work are configured independently for
+each bot connection.
+
+| Who can connect groups      | Behavior                                                                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner only                  | The paired owner adds the bot; additions by other people are rejected. This is the default.                                                       |
+| Owner and allowed users     | The owner and the configured Telegram user IDs can add the bot.                                                                                   |
+| Approve each group in Paseo | Any addition, including one by the owner, waits under **Groups awaiting approval**. Approve or reject it in Paseo. Rejection makes the bot leave. |
+| Anyone who can add the bot  | A group is connected immediately when the bot is added. Its request policy still applies.                                                         |
+
+The owner must be paired before any group becomes active. Pending groups cannot
+run agent work; `/status@your_bot` explains that approval is needed. Approval
+checks that the bot is still a member. You can revoke admitted groups from the
+settings screen. Changing admission policy does not revoke groups already
+admitted; revoke them explicitly. Pending additions are evaluated under the new
+saved policy on the receiver's next poll.
 
 Direct messages default to **owner only**. Group requests default to **owner and
-allowed users**. You can explicitly allow all group members or anyone in direct
-messages. In groups, the default trigger is an `@mention`, an addressed
+allowed users**. Group requests can instead allow **Group administrators** or
+**All group members**. The paired owner is always allowed to request work.
+The administrators policy verifies the sender against Telegram's administrator
+list before dispatch and rechecks queued work and delivery. Allowed user IDs do
+not bypass that policy. Lookup failure blocks unverified requests and reports
+the issue in Paseo. Anonymous administrator messages do not identify a user and
+are not accepted as user requests.
+
+You can also allow anyone in direct messages. In groups, the default trigger is an `@mention`, an addressed
 `/ask@your_bot` command, or a reply to the bot. An optional mode handles every
 text message.
+
+Existing installations keep their request permissions and owner-only admission
+when upgrading from versions without the admission setting. Updates do not
+silently open access, and an older settings payload cannot reset a new admission
+choice.
 
 Requests run with the linked agent's ordinary tools, credentials and permissions.
 Separate histories and Git branches do not isolate the host's filesystem or
@@ -120,6 +146,9 @@ answered in Telegram by replying with an option number or free text.
 - Telegram write pacing and `retry_after` backoff apply across a chat's topics.
 
 Private reasoning and tool arguments/output are excluded from progress updates.
+All connector-generated service messages are English, including setup, progress,
+clarification instructions and errors. User messages, agent commentary, question
+content and final answers keep their original language.
 This first release accepts text messages. Media input, voice transcription,
 channel posts and Telegram Business connections are not implemented. Images in
 agent Markdown remain links; diagrams and formulas are not rendered to images.
@@ -173,7 +202,8 @@ npm run pack
 ```
 
 The browser check renders the actual cross-platform screen with fixture RPCs
-and host UI adapters. It checks saving both routing modes, optional Bots, token
+and host UI adapters. It checks saving both routing modes, independent group policies,
+approval/rejection, optional Bots, token
 masking, React errors and overflow at desktop/phone widths. It requires Chromium
 or Chrome:
 
@@ -183,14 +213,15 @@ CHROME_BIN=google-chrome npm run check:browser
 
 With the Paseo CLI installed, `npm run check:daemon` launches a disposable daemon
 with a simulated Telegram API and proves reception before any app/RPC connects.
+It verifies headless reception, pending-group denial and native approval/rejection RPCs.
 It never uses an existing daemon, bot token, model subscription or customer chat.
 
 Pass an installation source and optional Git revision to verify a clean managed
 installation. For example:
 
 ```sh
-npm run check:daemon -- github:Daaaaave/paseo-telegram v0.1.2
-npm run check:daemon -- npm:paseo-telegram@0.1.2
+npm run check:daemon -- github:Daaaaave/paseo-telegram v0.2.0
+npm run check:daemon -- npm:paseo-telegram@0.2.0
 ```
 
 `npm run pack` writes the npm tarball to `.artifacts/`, omitting the Git-only

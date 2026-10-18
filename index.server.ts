@@ -6,6 +6,7 @@ import {
   listRpc,
   pairRpc,
   revokeRpc,
+  reviewRpc,
   saveRpc,
 } from "./shared/contracts.ts";
 import { Manager } from "./server/manager.ts";
@@ -20,6 +21,9 @@ export default function contribute(server: PluginServerContext) {
   server.handle(pairRpc, ({ id }) => manager.pair(id));
   server.handle(disconnectRpc, ({ id }) => manager.disconnect(id));
   server.handle(revokeRpc, ({ id, chatId }) => manager.revoke(id, chatId));
+  server.handle(reviewRpc, ({ id, chatId, approve }) =>
+    manager.review(id, chatId, approve),
+  );
   server.on("agent.created", ({ agent }, { paseo }) =>
     manager.onAgentCreated(agent.id, paseo),
   );

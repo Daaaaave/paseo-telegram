@@ -148,9 +148,18 @@ export const initialState = (): State => ({
 export class Store {
   state = initialState();
   private saving: Promise<void> = Promise.resolve();
+  private groupChanges: Promise<void> = Promise.resolve();
   readonly root: string;
   constructor(root: string) {
     this.root = root;
+  }
+  withGroups<T>(operation: () => Promise<T>): Promise<T> {
+    const task = this.groupChanges.then(operation);
+    this.groupChanges = task.then(
+      () => {},
+      () => {},
+    );
+    return task;
   }
   async load(): Promise<void> {
     const raw = await readJson(join(this.root, "state.json"));

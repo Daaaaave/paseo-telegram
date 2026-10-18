@@ -30,3 +30,14 @@ Private reasoning and raw tool output are not forwarded.
 
 Telegram requests use the chosen Paseo agent's tools and permissions. This
 connector does not supply a model subscription or grant additional tools.
+
+## Group access
+
+Choose who can connect groups: the owner, the owner and allowed users, anyone,
+or approval in Paseo for each new group. Separately choose who can request work
+inside admitted groups: the owner and allowed users, Telegram group
+administrators, or all members. The paired owner can always request work.
+
+Pending groups cannot run work. Approve or reject them in the sidebar; rejection
+makes the bot leave. Existing installations keep their access settings on update.
+Connector service messages are English; agent answers keep their own language.

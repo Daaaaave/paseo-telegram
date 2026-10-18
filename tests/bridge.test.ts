@@ -58,12 +58,15 @@ const message = (chatId = -100, topic = 0, user = 10): TelegramMessage => ({
 });
 class Recorder extends Telegram {
   calls: { method: string; payload: Record<string, unknown> }[] = [];
+  administrators: () => Promise<unknown> = async () => [];
   override async call<T>(
     method: string,
     payload: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<T> {
     this.calls.push({ method, payload });
+    if (method === "getChatAdministrators")
+      return (await this.administrators()) as T;
     if (method === "getMe") return { id: 77, username: "demo_help_bot" } as T;
     if (method === "getWebhookInfo") return { url: "" } as T;
     if (method === "getUpdates")
@@ -290,6 +293,224 @@ test("only the owner can admit groups; a promotion does not revoke admission", a
   assert.ok(f.store.state.groups["-300"]);
   await f.bridge.handle(membership(999, "administrator", "left"));
   assert.equal(f.store.state.groups["-300"], undefined);
+});
+
+test("group admission policies are independent of request permissions", async () => {
+  for (const mode of ["owner", "operators", "approval", "everyone"] as const) {
+    for (const actor of [10, 20, 99]) {
+      const f = await fixture();
+      f.connection.policy.groupAdmission = mode;
+      f.connection.policy.operators = [20];
+      await f.bridge.handle({
+        update_id: 1,
+        my_chat_member: {
+          chat: { id: -300, type: "supergroup", title: "New group" },
+          from: { id: actor },
+          date: 100,
+          old_chat_member: { status: "left" },
+          new_chat_member: { status: "member" },
+        },
+      });
+      const admitted =
+        mode === "everyone" ||
+        (mode !== "approval" &&
+          (actor === 10 || (mode === "operators" && actor === 20)));
+      assert.equal(
+        !!f.store.state.groups["-300"],
+        admitted,
+        `${mode}/${actor}`,
+      );
+      assert.equal(!!f.store.state.pendingGroups["-300"], mode === "approval");
+      assert.equal(
+        f.telegram.calls.some((c) => c.method === "leaveChat"),
+        !admitted && mode !== "approval",
+      );
+      await f.bridge.handle({ update_id: 2, message: message(-300, 0, 99) });
+      assert.equal(f.sent.length, 0, "admission must not grant request access");
+      if (admitted) {
+        f.connection.policy.groupUsers = "everyone";
+        await f.bridge.handle({ update_id: 3, message: message(-300, 0, 99) });
+        assert.equal(f.sent.length, 1);
+      }
+    }
+  }
+});
+
+test("pending groups survive pairing and reload without becoming authorized", async () => {
+  const f = await fixture();
+  f.connection.policy.groupAdmission = "approval";
+  f.store.state.ownerId = null;
+  const nonce = "d".repeat(32);
+  f.store.state.pairing = {
+    hash: createHash("sha256").update(nonce).digest("hex"),
+    expiresAt: Date.now() + 30_000,
+  };
+  await f.bridge.handle({
+    update_id: 1,
+    my_chat_member: {
+      chat: { id: -300, type: "supergroup", title: "Pending" },
+      from: { id: 10 },
+      date: 100,
+      old_chat_member: { status: "left" },
+      new_chat_member: { status: "member" },
+    },
+  });
+  await f.bridge.handle({
+    update_id: 2,
+    message: { ...message(10), text: `/start owner_${nonce}` },
+  });
+  assert.ok(f.store.state.pendingGroups["-300"]);
+  assert.equal(f.store.state.groups["-300"], undefined);
+  await f.bridge.handle({ update_id: 3, message: message(-300) });
+  assert.equal(f.sent.length, 0);
+  await f.bridge.handle({
+    update_id: 4,
+    message: {
+      ...message(-300),
+      text: "/status@demo_help_bot",
+      entities: [],
+    },
+  });
+  assert.match(
+    String(f.telegram.calls.at(-1)?.payload.text),
+    /awaiting approval/,
+  );
+  const reloaded = new Store(f.root);
+  await reloaded.load();
+  assert.ok(reloaded.state.pendingGroups["-300"]);
+  assert.equal(reloaded.state.groups["-300"], undefined);
+  assert.equal(
+    f.telegram.calls.some((c) => c.method === "leaveChat"),
+    false,
+  );
+  await f.bridge.handle({
+    update_id: 5,
+    message: { ...message(-300), migrate_to_chat_id: -400 },
+  });
+  assert.equal(f.store.state.pendingGroups["-300"], undefined);
+  assert.ok(f.store.state.pendingGroups["-400"]);
+  await f.bridge.handle({
+    update_id: 6,
+    my_chat_member: {
+      chat: { id: -400, type: "supergroup" },
+      from: { id: 10 },
+      date: 100,
+      old_chat_member: { status: "member" },
+      new_chat_member: { status: "left" },
+    },
+  });
+  assert.equal(f.store.state.pendingGroups["-400"], undefined);
+});
+
+test("admin requests require verified Telegram roles and fail closed", async () => {
+  const f = await fixture();
+  f.connection.policy.groupUsers = "admins";
+  f.connection.policy.operators = [20];
+  const bot = { status: "administrator", user: { id: 77 } };
+  const member = { status: "administrator", user: { id: 20 } };
+  f.telegram.administrators = async () => [bot, member];
+  await f.bridge.handle({ update_id: 1, message: message(-100, 0, 20) });
+  assert.equal(f.sent.length, 1);
+  assert.ok(
+    f.telegram.calls.filter((c) => c.method === "getChatAdministrators")
+      .length >= 3,
+  );
+  const calls = f.telegram.calls.length;
+  await f.bridge.handle({
+    update_id: 2,
+    message: {
+      ...message(-100, 0, 20),
+      text: "Ordinary group chatter",
+      entities: [],
+    },
+  });
+  await f.bridge.handle({ update_id: 3, message: message(-999, 0, 20) });
+  assert.equal(
+    f.telegram.calls.length,
+    calls,
+    "unaddressed or unadmitted messages must not fetch roles",
+  );
+  for (const [index, lookup] of [
+    async () => [bot],
+    async () => {
+      throw new Error("Telegram is unavailable");
+    },
+    async () => ({ unexpected: true }),
+  ].entries()) {
+    f.telegram.administrators = lookup;
+    await f.bridge.handle({
+      update_id: index + 4,
+      message: message(-100, 0, 20),
+    });
+    assert.equal(
+      f.sent.length,
+      1,
+      "allowed IDs must not bypass the admins policy",
+    );
+  }
+  assert.match(f.bridge.lastError!, /could not be verified/);
+  f.telegram.administrators = async () => [{ ...member, status: "creator" }];
+  await f.bridge.handle({ update_id: 9, message: message(-100, 0, 20) });
+  assert.equal(
+    f.sent.length,
+    2,
+    "human roles do not require the bot itself in the administrator list",
+  );
+  f.telegram.administrators = async () => {
+    assert.fail("owner and DMs do not require group admin lookups");
+  };
+  await f.bridge.handle({ update_id: 10, message: message(-100) });
+  await f.bridge.handle({ update_id: 11, message: message(10) });
+  assert.equal(f.sent.length, 4);
+});
+
+test("an admin demoted before queued work starts cannot dispatch to the agent", async () => {
+  const queue = new AgentQueue(),
+    f = await fixture(config(), sdk(), queue);
+  f.connection.policy.groupUsers = "admins";
+  let release!: () => void, seen!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    seen = resolve;
+  });
+  const gate = queue.run(
+    `conversation:${f.connection.id}:-100:0`,
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  let members = [
+    { status: "administrator", user: { id: 77 } },
+    { status: "creator", user: { id: 20 } },
+  ];
+  f.telegram.administrators = async () => {
+    const current = members;
+    seen();
+    return current;
+  };
+  const request = f.bridge.handle({
+    update_id: 1,
+    message: message(-100, 0, 20),
+  });
+  await ready;
+  members = [members[0]];
+  release();
+  await Promise.all([gate, request]);
+  assert.equal(f.sent.length, 0);
+  assert.equal(f.created.length, 0);
+  assert.equal(f.store.state.jobs["1"].delivery, "canceled");
+});
+
+test("service replies stay English for Cyrillic requests", async () => {
+  const f = await fixture();
+  await f.bridge.handle({
+    update_id: 1,
+    message: { ...message(10), text: "/status проверка" },
+  });
+  const text = String(f.telegram.calls.at(-1)?.payload.text);
+  assert.match(text, /^Ready:/);
+  assert.doesNotMatch(text, /\p{Script=Cyrillic}/u);
 });
 
 test("owner pairing is private, expiring, and consumed exactly once", async () => {
@@ -642,6 +863,61 @@ test("native questions are answered only by a reply in the exact chat and topic"
     requestId: "question",
     response: { behavior: "allow", updatedInput: { answers: { Mode: "B" } } },
   });
+  assert.equal(f.store.state.jobs[1].question!.status, "answered");
+});
+
+test("a demoted admin cannot answer a native question, and the owner can still answer it", async () => {
+  const f = await fixture();
+  f.connection.policy.groupUsers = "admins";
+  let members = [{ status: "administrator", user: { id: 20 } }];
+  f.telegram.administrators = async () => members;
+  const agent = f.api.agents.ref("question-agent");
+  let answered = false;
+  agent.refresh = async () => {
+    members = [];
+    return {
+      agent: {
+        id: "question-agent",
+        status: "idle",
+        pendingPermissions: [
+          {
+            id: "question",
+            name: "request_user_input",
+            kind: "question",
+            input: {},
+          },
+        ],
+      },
+    } as never;
+  };
+  agent.respondToPermission = async () => {
+    answered = true;
+  };
+  f.store.state.jobs[1] = {
+    agentId: "question-agent",
+    destination: { chatId: -100, topicId: 0 },
+    delivery: "done",
+    question: {
+      requestId: "question",
+      fields: [{ header: "Mode", text: "Choose", options: ["A", "B"] }],
+      status: "pending",
+      messageId: 99,
+    },
+  };
+  const reply = {
+    ...message(-100, 0, 20),
+    text: "2",
+    reply_to_message: { message_id: 99, from: { id: 77 } },
+  };
+  await f.bridge.handle({ update_id: 2, message: reply });
+  assert.equal(answered, false);
+  assert.equal(f.store.state.jobs[1].question!.status, "pending");
+  assert.equal(f.store.state.jobs[2].questionReply?.attempted, undefined);
+  await f.bridge.handle({
+    update_id: 3,
+    message: { ...reply, from: { id: 10 } },
+  });
+  assert.equal(answered, true);
   assert.equal(f.store.state.jobs[1].question!.status, "answered");
 });
 

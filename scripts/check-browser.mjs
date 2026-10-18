@@ -198,6 +198,74 @@ try {
     ".context/ui-check/mobile.png",
     Buffer.from(shot.data, "base64"),
   );
+  // Admission and request permissions are independent and survive saving.
+  for (const admission of ["operators", "approval", "everyone", "owner"]) {
+    await select("Who can connect groups", admission);
+    await select("Requests inside admitted groups", "admins");
+    assert.match(await text(), /Telegram verifies group administrator roles/);
+    await click("Save settings");
+    const policy = await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.save').at(-1).input.policy`,
+    );
+    assert.equal(policy.groupAdmission, admission);
+    assert.equal(policy.groupUsers, "admins");
+    assert.equal(
+      await evaluate(
+        `document.querySelector('select[aria-label="Who can connect groups"]').value`,
+      ),
+      admission,
+    );
+  }
+  await navigate("?pending=1");
+  assert.match(await text(), /Groups awaiting approval/);
+  await evaluate(
+    `document.querySelector('[aria-label="Approve New community"]').scrollIntoView({block:'center'})`,
+  );
+  await wait();
+  assert.equal(
+    await evaluate(`document.documentElement.scrollWidth<=innerWidth`),
+    true,
+  );
+  shot = await send("Page.captureScreenshot", { format: "png" });
+  await writeFile(
+    ".context/ui-check/approval-phone.png",
+    Buffer.from(shot.data, "base64"),
+  );
+  await click("Approve");
+  assert.equal(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.review').at(-1).input.approve`,
+    ),
+    true,
+  );
+  assert.match(await text(), /Group approved/);
+  assert.doesNotMatch(await text(), /Groups awaiting approval/);
+  await navigate("?pending=1");
+  await click("Reject");
+  assert.equal(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.review').at(-1).input.approve`,
+    ),
+    false,
+  );
+  assert.match(await text(), /Group rejected/);
+  assert.doesNotMatch(await text(), /Groups awaiting approval/);
+
+  await navigate("?pending=1");
+  await select("Requests inside admitted groups", "everyone");
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[aria-label="Approve New community"]').getAttribute('aria-disabled')`,
+    ),
+    "true",
+  );
+  await click("Discard edits");
+  assert.notEqual(
+    await evaluate(
+      `document.querySelector('[aria-label="Approve New community"]').getAttribute('aria-disabled')`,
+    ),
+    "true",
+  );
   // A connected token is not a ready agent; only saved routing activates replies.
   await navigate("?setup=1");
   assert.match(await text(), /Choose destination/);
@@ -333,6 +401,8 @@ try {
     unsavedDestinationInactive: true,
     perConversationOverrides: true,
     missingProviderGuidance: true,
+    independentGroupPolicies: true,
+    groupApprovalAndRejection: true,
     savePayloads: true,
     maskedToken: true,
     noHorizontalOverflow: true,

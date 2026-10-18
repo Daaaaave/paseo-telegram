@@ -7,7 +7,8 @@ import type { Choices, ConnectionView } from "../shared/contracts.ts";
 import { Registry } from "./registry.ts";
 import { Store } from "./store.ts";
 import { Bridge } from "./bridge.ts";
-import { Telegram, pause } from "./telegram.ts";
+import { Telegram, TelegramError, pause } from "./telegram.ts";
+import { isMember, type Membership } from "../shared/telegram.ts";
 import { Router, AgentQueue, isCurrentRoute } from "./routing.ts";
 import { BotsAdapter } from "./bots.ts";
 import { connectLocalDaemon, type DaemonConnection } from "./daemon.ts";
@@ -27,10 +28,17 @@ export class Manager {
   private readonly root: string;
   private readonly home: string;
   private readonly connect: typeof connectLocalDaemon;
-  constructor(root: string, home: string, connect = connectLocalDaemon) {
+  private readonly telegram: (token: () => Promise<string>) => Telegram;
+  constructor(
+    root: string,
+    home: string,
+    connect = connectLocalDaemon,
+    telegram = (token: () => Promise<string>) => new Telegram(token),
+  ) {
     this.root = root;
     this.home = home;
     this.connect = connect;
+    this.telegram = telegram;
     this.registry = new Registry(root);
     this.loading = this.registry.load().catch(() => {
       this.error =
@@ -99,7 +107,7 @@ export class Manager {
     try {
       const store = await this.store(config.id);
       if (!config.enabled) return;
-      const telegram = new Telegram(() => this.registry.token(config.id));
+      const telegram = this.telegram(() => this.registry.token(config.id));
       const router = new Router(
         this.daemon.api,
         new BotsAdapter(this.daemon.invoke, this.daemon.serverId),
@@ -178,6 +186,9 @@ export class Manager {
         groups: Object.entries(store?.state.groups ?? {}).map(
           ([id, group]) => ({ id, title: group.title }),
         ),
+        pendingGroups: Object.entries(store?.state.pendingGroups ?? {}).map(
+          ([id, group]) => ({ id, title: group.title }),
+        ),
         conversations: Object.values(store?.state.conversations ?? {}).map(
           (value) => ({
             key: value.key,
@@ -200,7 +211,7 @@ export class Manager {
   }): Promise<{ id: string; username: string }> {
     return this.exclusive(async () => {
       await this.requireDaemon();
-      const telegram = new Telegram(async () => input.token);
+      const telegram = this.telegram(async () => input.token);
       const identity = await telegram.call<{
         id: number;
         username: string;
@@ -225,14 +236,22 @@ export class Manager {
   save(
     input: Pick<
       Connection,
-      "id" | "name" | "enabled" | "target" | "policy" | "bindings" | "revision"
-    >,
+      "id" | "name" | "enabled" | "target" | "bindings" | "revision"
+    > & {
+      policy: Omit<Connection["policy"], "groupAdmission"> & {
+        groupAdmission?: Connection["policy"]["groupAdmission"];
+      };
+    },
   ): Promise<Connection> {
     return this.exclusive(async () => {
       await this.loading;
       const daemon = input.enabled ? await this.requireDaemon() : null;
       const current = this.registry.get(input.id);
-      const config = connectionSchema.parse({ ...current, ...input });
+      const config = connectionSchema.parse({
+        ...current,
+        ...input,
+        policy: { ...current.policy, ...input.policy },
+      });
       for (const target of config.enabled
         ? [config.target, ...Object.values(config.bindings)]
         : []) {
@@ -315,10 +334,69 @@ export class Manager {
     return this.exclusive(async () => {
       this.registry.get(id);
       const store = await this.store(id);
-      delete store.state.groups[chatId];
-      delete store.state.pendingGroups[chatId];
-      await store.save();
+      await store.withGroups(async () => {
+        delete store.state.groups[chatId];
+        delete store.state.pendingGroups[chatId];
+        await store.save();
+      });
       return { revoked: true };
+    });
+  }
+  review(
+    id: string,
+    chatId: string,
+    approve: boolean,
+  ): Promise<{ approved: boolean }> {
+    return this.exclusive(async () => {
+      await this.loading;
+      const config = this.registry.get(id),
+        store = await this.store(id);
+      return store.withGroups(async () => {
+        if (store.state.ownerId === null)
+          throw new Error("Confirm the owner before reviewing groups.");
+        if (config.policy.groupAdmission !== "approval")
+          throw new Error(
+            "Save the approval admission policy before reviewing groups.",
+          );
+        const group = store.state.pendingGroups[chatId];
+        if (!group)
+          throw new Error(
+            "This group is no longer waiting for approval. Refresh the list.",
+          );
+        const telegram = this.telegram(() => this.registry.token(id));
+        if (approve) {
+          const member = await telegram.call<Membership>(
+            "getChatMember",
+            {
+              chat_id: Number(chatId),
+              user_id: config.botId,
+            },
+            this.controller.signal,
+          );
+          if (!isMember(member))
+            throw new Error(
+              "The bot is no longer in this group. Add it again before approving.",
+            );
+          store.state.groups[chatId] = group;
+        } else {
+          try {
+            await telegram.call(
+              "leaveChat",
+              { chat_id: Number(chatId) },
+              this.controller.signal,
+            );
+          } catch (error) {
+            if (
+              !(error instanceof TelegramError) ||
+              ![400, 403].includes(error.code)
+            )
+              throw error;
+          }
+        }
+        delete store.state.pendingGroups[chatId];
+        await store.save();
+        return { approved: approve };
+      });
     });
   }
   async choices(): Promise<Choices> {

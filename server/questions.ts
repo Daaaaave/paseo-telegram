@@ -40,7 +40,7 @@ export function questionFrom(request: Permission): Question | undefined {
   return { requestId: request.id, fields, status: "pending" };
 }
 
-export function questionText(question: Question, russian: boolean): string {
+export function questionText(question: Question): string {
   const body = question.fields
     .map(
       (field, index) =>
@@ -49,13 +49,9 @@ export function questionText(question: Question, russian: boolean): string {
     .join("\n\n");
   const instruction =
     question.fields.length === 1
-      ? russian
-        ? "Ответьте на это сообщение номером варианта или своим текстом."
-        : "Reply to this message with an option number or your own text."
-      : russian
-        ? "Ответьте на это сообщение, указав каждый ответ отдельной строкой: 1: ответ, 2: ответ."
-        : "Reply to this message with one answer per line: 1: answer, 2: answer.";
-  return `${russian ? "Уточняющий вопрос:" : "Clarification:"}\n\n${body}\n\n${instruction}`;
+      ? "Reply to this message with an option number or your own text."
+      : "Reply to this message with one answer per line: 1: answer, 2: answer.";
+  return `Clarification:\n\n${body}\n\n${instruction}`;
 }
 
 export function questionAnswers(

@@ -2,6 +2,7 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import {
   connectionSchema,
+  groupAdmissionSchema,
   idSchema,
   policySchema,
   targetSchema,
@@ -9,6 +10,13 @@ import {
 
 const empty = z.object({}).strict();
 const connectionId = z.object({ id: z.uuid() }).strict();
+const groupChatId = z
+  .string()
+  .regex(/^-\d+$/)
+  .refine(
+    (value) => Number.isSafeInteger(Number(value)),
+    "Invalid Telegram group ID",
+  );
 export const connectionViewSchema = z.object({
   config: connectionSchema,
   ownerId: z.number().nullable(),
@@ -16,6 +24,9 @@ export const connectionViewSchema = z.object({
   lastError: z.string().nullable(),
   queued: z.number(),
   groups: z.array(z.object({ id: z.string(), title: z.string() })),
+  pendingGroups: z
+    .array(z.object({ id: z.string(), title: z.string() }))
+    .default([]),
   conversations: z.array(
     z.object({
       key: z.string(),
@@ -58,7 +69,9 @@ export const saveRpc = defineRpc({
       name: z.string().trim().min(1).max(80),
       enabled: z.boolean(),
       target: targetSchema.nullable(),
-      policy: policySchema,
+      policy: policySchema.omit({ groupAdmission: true }).extend({
+        groupAdmission: groupAdmissionSchema.optional(),
+      }),
       bindings: z.record(z.string().regex(/^-?\d+:\d+$/), targetSchema),
     })
     .strict(),
@@ -76,10 +89,19 @@ export const disconnectRpc = defineRpc({
 });
 export const revokeRpc = defineRpc({
   name: "telegram.revoke",
-  input: z
-    .object({ id: z.uuid(), chatId: z.string().regex(/^-\d+$/) })
-    .strict(),
+  input: z.object({ id: z.uuid(), chatId: groupChatId }).strict(),
   output: z.object({ revoked: z.boolean() }),
+});
+export const reviewRpc = defineRpc({
+  name: "telegram.review",
+  input: z
+    .object({
+      id: z.uuid(),
+      chatId: groupChatId,
+      approve: z.boolean(),
+    })
+    .strict(),
+  output: z.object({ approved: z.boolean() }),
 });
 export const modelSchema = z.object({
   id: z.string(),
