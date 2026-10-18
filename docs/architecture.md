@@ -85,6 +85,12 @@ versions use the workflow's short-lived OIDC identity without an npm token.
 No workflow connects to an installation or deploys to a daemon. Registry review
 and an installation's update action are separate from npm publication.
 
+Submit an immutable npm release (`npm:paseo-telegram@<version>`) to the registry.
+The published artifact includes the production shrinkwrap; npm acquisition
+installs that dependency tree without a Git-only manifest preparation command.
+The registry proposes update PRs for new npm versions. Those updates still need
+review, and installed daemons keep their approved pin until explicitly updated.
+
 Official contracts checked during implementation:
 
 - [Paseo plugin reference](https://paseo.sh/docs/plugins/reference)
