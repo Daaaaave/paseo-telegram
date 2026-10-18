@@ -1,0 +1,13 @@
+{
+  "id": "telegram",
+  "name": "Telegram",
+  "description": "Bring Telegram conversations into Paseo. Link existing chats, create chats per group or topic, and optionally use Bots profiles.",
+  "requirements": {
+    "paseo": ">=0.11.2 <0.12.0"
+  },
+  "icon": "assets/icon.png",
+  "media": [
+    "assets/desktop.png",
+    "assets/mobile.png"
+  ]
+}

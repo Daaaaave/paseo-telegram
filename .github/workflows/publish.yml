@@ -1,0 +1,41 @@
+name: Publish
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: npm-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: npm-shrinkwrap.json
+      - name: Match stable release tag and repository
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: node scripts/check-release.mjs
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run check:package
+      - run: npm audit --omit=dev
+      - name: Pack inspected artifact
+        run: |
+          mkdir -p .artifacts
+          npm pack --ignore-scripts --pack-destination .artifacts
+      - name: Publish to npm with OIDC
+        run: npm publish .artifacts/paseo-telegram-*.tgz --access public

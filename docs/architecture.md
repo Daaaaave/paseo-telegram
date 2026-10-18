@@ -1,0 +1,92 @@
+# Architecture
+
+## Independent choices
+
+A connection belongs to one Telegram bot. Its default destination and optional
+chat/topic overrides choose an existing Paseo agent or a workspace. Workspace
+routes choose ordinary agent configuration or a Bots profile. Bots is a
+server-side adapter, never a mandatory package dependency. This keeps transport,
+routing and agent configuration independent.
+
+Telegram conversation identities contain the chat ID and thread ID. Internal
+agent/message IDs also include the bot connection ID. Identical Telegram update
+IDs from different bots cannot collide. Group-to-supergroup aliases preserve
+the original conversation identity. Explicit destination changes create distinct
+routes without deleting earlier agents.
+
+## Runtime owners
+
+- `Manager` loads connection configuration, owns the local Paseo connection,
+  manages receivers and serves authenticated plugin RPCs.
+- `Registry` validates configuration, serializes writes and checks revisions.
+  It stores tokens separately and never returns them through list/settings RPCs.
+- Each `Bridge` owns a bot's polling, admission, jobs, progress and deliveries.
+- `Router` selects the agent/workspace and configures new agents. Existing agent
+  configuration is never overwritten.
+- `AgentQueue` serializes conversation work and shared-agent access across bots.
+- `BotsAdapter` uses the installed plugin's settings/prompt/mount RPCs. Only
+  profile IDs and names leave the server when populating the selector.
+- `sync.ts` serializes Git integration by common repository directory and pins
+  the fetched commit before touching a conversation worktree.
+
+The server uses a separately authenticated local SDK session for startup without
+an app. Lifecycle callbacks follow ZeroSub continuation labels and mark native
+question receipts answered. No model provider is implemented or intercepted.
+
+## Persistence and recovery
+
+All state documents are versioned and schema-validated. Corrupt state fails
+closed instead of resetting a conversation. Writes use private temporary files
+and atomic rename. Configuration revision checks prevent clients overwriting
+each other's edits.
+
+The job receipt records its destination, route, agent, pre-send timeline boundary,
+dispatch state, pending native question and Telegram message ID. A reload
+reattaches to an existing dispatched task. An interrupted dispatch searches for
+its exact namespaced message ID back to its saved timeline boundary. Changed,
+missing or unprovable history requires operator attention instead of replaying
+an operation.
+
+A completed single-chunk final edit can be retried idempotently. An uncertain
+new send or multi-part delivery is not automatically resent. This intentionally
+prefers a visible delivery issue over duplicate code/deployment execution.
+
+## Authorization boundaries
+
+| Boundary | Enforcement |
+| --- | --- |
+| Paseo operator → settings | Authenticated Paseo plugin RPC; strict input schemas; server-side target checks. |
+| Telegram owner claim | Expiring random nonce, SHA-256 hash, constant-time comparison, one-time consumption. |
+| Group admission | Owner's `my_chat_member` add event; queued work rechecks admission. |
+| Request sender | Owner/operator/everyone policy enforced before agent access and again after queuing. |
+| Conversation history | Per chat/topic routes; global guard requires explicit shared-history opt-in for existing agents. |
+| Clarification answer | Original form, agent, question message, chat and topic must match. |
+| Permissions | Only native question forms are answered from Telegram. Tool/plan approvals remain in Paseo. |
+| Credentials | Server-only token files; sanitized API errors; public progress excludes credential-like strings. |
+| External content | A Telegram request is user input. Quoted third-party content is explicitly identified as untrusted. |
+
+These are transport boundaries on one trusted host. Agent tool permissions and
+host-user credentials remain Paseo's responsibility. Bots profiles can
+intentionally share their own memory/tools across their chats. Worktrees separate
+edits and do not create OS tenants.
+
+## Release
+
+The public repository contains generic code, tests, fixtures and documentation.
+Only runtime entries, shared/client/server code, the lockfile, listing assets and
+standard package documentation enter the npm artifact. The package check inspects
+that allowlist, local import closure, credential-like strings and dependency
+integrities.
+
+GitHub checks and stable version tags drive npm publishing through OIDC after a
+maintainer configures this repository/workflow as the package's Trusted
+Publisher. Initial publication may need interactive npm account authorization.
+No workflow connects to an installation or deploys to a daemon. Registry review
+and an installation's update action are separate from npm publication.
+
+Official contracts checked during implementation:
+
+- [Paseo plugin reference](https://paseo.sh/docs/plugins/reference)
+- [Paseo plugin publishing](https://paseo.sh/docs/plugins/publishing)
+- [Telegram Bot API](https://core.telegram.org/bots/api)
+- [Paseo Bots](https://github.com/oliexe/paseo-bots)
