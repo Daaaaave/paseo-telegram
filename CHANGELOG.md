@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Remove the Paseo version restriction so daemon and app updates do not block
+  plugin loading. Package checks enforce the unrestricted manifest.
+
 ## 0.2.0
 
 - Configure group admission independently: owner, owner and allowed users,

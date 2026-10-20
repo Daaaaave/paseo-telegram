@@ -3,7 +3,7 @@
   "name": "Telegram",
   "description": "Bring Telegram conversations into Paseo. Link existing chats, create chats per group or topic, and optionally use Bots profiles.",
   "requirements": {
-    "paseo": ">=0.11.2 <0.12.0"
+    "paseo": "*"
   },
   "build": [["npm", "ci", "--omit=dev", "--ignore-scripts"]],
   "icon": "assets/icon.png",

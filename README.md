@@ -8,8 +8,8 @@ Telegram group and topic its own conversation. The
 
 ## Install
 
-Requires a Paseo daemon and app on **0.11.2–0.11.x**, with Node **22.18+** on
-the daemon host.
+Requires Node **22.18+** on the daemon host and plugins enabled in Paseo.
+The plugin does not restrict the daemon or connected app by Paseo version.
 
 ```sh
 paseo plugin add npm:paseo-telegram

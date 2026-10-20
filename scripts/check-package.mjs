@@ -16,7 +16,7 @@ await withNpmPackage(async (root) => {
   assert.equal(lock.name, pkg.name);
   assert.equal(lock.version, pkg.version);
   assert.equal(manifest.id, "telegram");
-  assert.equal(manifest.requirements.paseo, ">=0.11.2 <0.12.0");
+  assert.equal(manifest.requirements.paseo, "*", "Paseo versions must not block plugin loading");
   assert.equal(
     manifest.build,
     undefined,
