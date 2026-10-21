@@ -143,6 +143,13 @@ answered in Telegram by replying with an option number or free text.
 - Pending requests survive reloads. Recovery follows the existing agent and
   checks dispatch receipts before sending anything again.
 - Replies to questions are matched to the exact chat, topic and original form.
+  They reach the native question form immediately, without waiting behind the
+  task they are meant to unblock. If that task is still running, the reply gets
+  an acknowledgement and the task's original progress message receives the final
+  answer. Replies to questions from completed tasks wait for their new result.
+- Questions already outstanding before a new request are not reposted under it.
+  Their original Telegram messages remain replyable; a repeated answer does not
+  create another agent prompt.
 - Telegram write pacing and `retry_after` backoff apply across a chat's topics.
 
 Private reasoning and tool arguments/output are excluded from progress updates.

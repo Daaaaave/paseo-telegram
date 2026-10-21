@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- Deliver native clarification answers without waiting behind the foreground
+  task, keeping ordinary requests serialized. Running tasks retain ownership of
+  their final reply; an idle chat's answer still waits for its follow-up result.
+- Keep old outstanding forms out of unrelated new requests, including recovered
+  tasks. Repeated replies do not become new prompts, and interrupted permission
+  responses are not replayed or falsely acknowledged.
+
 ## 0.2.2
 
 - Resume dormant saved Paseo chats before Git synchronization, request dispatch,

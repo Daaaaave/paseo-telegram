@@ -436,7 +436,7 @@ export class Bridge {
     };
     const receipt = Object.entries(state.jobs).find(
       ([, value]) =>
-        value.question?.status === "pending" &&
+        value.question !== undefined &&
         value.destination?.chatId === message.chat.id &&
         value.destination.topicId === (message.message_thread_id ?? 0) &&
         value.question.messageId !== undefined &&
@@ -464,11 +464,16 @@ export class Bridge {
   private enqueue(updateId: number, message: TelegramMessage): Promise<void> {
     const active = this.tasks.get(updateId);
     if (active) return active;
-    const task = this.queue
-      .run(
-        `conversation:${this.connection().id}:${conversationKey(message)}`,
-        () => this.deliver(updateId, message),
-      )
+    // A question response is control input for work already holding these
+    // queues. Serializing it behind that work would deadlock a waiting agent.
+    const deliver = () => this.deliver(updateId, message);
+    const job = this.store.state.jobs[String(updateId)];
+    const task = (job.questionReply || job.answer
+      ? deliver()
+      : this.queue.run(
+          `conversation:${this.connection().id}:${conversationKey(message)}`,
+          deliver,
+        ))
       .catch(() => {
         if (!this.signal.aborted)
           this.lastError = "A Telegram task needs attention in Paseo.";
@@ -557,15 +562,105 @@ export class Bridge {
     delete job.message;
     await this.store.save();
   }
-  private answer(
+  private async answer(
     message: TelegramMessage,
     updateId: number,
     progress: ProgressMessage,
   ): Promise<string> {
+    const job = this.store.state.jobs[String(updateId)];
+    if (job.questionReply) {
+      const source = this.store.state.jobs[job.questionReply.sourceJobId];
+      const receipt = await this.queue.run(
+        `question:${job.agentId}:${source?.question?.requestId}`,
+        () => this.respondToQuestion(message, job, progress),
+      );
+      if (receipt) return receipt;
+    }
     return this.queue.run(
       this.router.queueKey(message, this.store.state.jobs[String(updateId)]),
       () => this.answerUnlocked(message, updateId, progress),
     );
+  }
+  private async respondToQuestion(
+    message: TelegramMessage,
+    job: Job,
+    progress: ProgressMessage,
+  ): Promise<string | undefined> {
+    if (this.signal.aborted || !(await this.authorized(message)))
+      throw new RoutingError("This conversation is no longer authorized.");
+    const reply = job.questionReply!;
+    const state = this.store.state;
+    const source = state.jobs[reply.sourceJobId];
+    if (!reply.attempted) {
+      if (!source?.question || source.question.status !== "pending")
+        return "This question has already been answered. Send a new message to continue.";
+      const agent = this.router.api.agents.ref(job.agentId!);
+      const snapshot = await refreshLinkedAgent(agent);
+      if (
+        !snapshot ||
+        snapshot.agent.archivedAt ||
+        snapshot.agent.status === "closed"
+      )
+        throw new RoutingError("The linked Paseo chat is unavailable.");
+      const request = snapshot.agent.pendingPermissions?.find(
+        (request) =>
+          request.id === source.question!.requestId &&
+          request.kind === "question",
+      );
+      if (!request) {
+        source.question.status = "answered";
+        return "This question has already been answered in Paseo.";
+      }
+      await progress.watch(agent);
+      if (request.name === "request_user_input_async") {
+        const timeline = await agent.timeline.refetch({
+          direction: "tail", limit: 1,
+        });
+        if (timeline.error)
+          throw new RoutingError(
+            "The linked chat history could not be read. Check it in Paseo before retrying.",
+          );
+        reply.followUpAfter = {
+          epoch: timeline.epoch,
+          seq: Math.max(0, ...timeline.entries.map((entry) => entry.seqEnd)),
+        };
+      }
+      reply.attempted = true;
+      source.question.status = "responding";
+      await this.store.save();
+      if (!(await this.authorized(message))) {
+        delete reply.attempted;
+        source.question.status = "pending";
+        await this.store.save();
+        throw new RoutingError("This conversation is no longer authorized.");
+      }
+      await agent.respondToPermission({
+        requestId: source.question.requestId,
+        response: { behavior: "allow", updatedInput: { answers: reply.answers } },
+      });
+      // Check after the RPC: the foreground task may finish while submitting.
+      // A task still waiting owns the final reply; otherwise this reply does.
+      reply.continuesInPlace = Object.values(state.jobs).some(
+        (other) =>
+          other !== job && other.agentId === job.agentId &&
+          !other.delivery && !other.answer && other.dispatch === "sent",
+      );
+      // A form may have receipts on an older installation. Completing any of
+      // them closes every copy without making a second permission response.
+      for (const other of Object.values(state.jobs))
+        if (
+          other.agentId === job.agentId &&
+          other.question?.requestId === source.question.requestId
+        )
+          other.question.status = "answered";
+      await this.store.save();
+    }
+    if (source?.question?.status !== "answered")
+      throw new RoutingError(
+        "The answer could not be confirmed in Paseo. Check its chat before retrying.",
+      );
+    if (reply.continuesInPlace)
+      return "Answer received. The agent is continuing its task.";
   }
   private async answerUnlocked(
     message: TelegramMessage,
@@ -593,53 +688,6 @@ export class Bridge {
     }
     let id = job.agentId!;
     if (job.questionReply) {
-      if (!job.questionReply.attempted) {
-        const source = state.jobs[job.questionReply.sourceJobId];
-        if (!source?.question || source.question.status !== "pending")
-          return "This question has already been answered. Send a new message to continue.";
-        const agent = api.agents.ref(id),
-          snapshot = await refreshLinkedAgent(agent);
-        const request = snapshot?.agent.pendingPermissions?.find(
-          (request) =>
-            request.id === source.question!.requestId &&
-            request.kind === "question",
-        );
-        if (!request) {
-          source.question.status = "answered";
-          return "This question has already been answered in Paseo.";
-        }
-        await progress.watch(agent);
-        if (
-          request.name === "request_user_input_async" &&
-          !snapshot!.agent.activeTurn
-        ) {
-          const timeline = await agent.timeline.refetch({ limit: 1 });
-          job.questionReply.followUpAfter = {
-            epoch: timeline.epoch,
-            seq: Math.max(0, ...timeline.entries.map((entry) => entry.seqEnd)),
-          };
-        }
-        job.questionReply.attempted = true;
-        source.question.status = "responding";
-        await this.store.save();
-        if (!(await this.authorized(message))) {
-          // No permission response was sent; keep the original question replyable.
-          delete job.questionReply.attempted;
-          if (source.question.status === "responding")
-            source.question.status = "pending";
-          await this.store.save();
-          throw new RoutingError("This conversation is no longer authorized.");
-        }
-        await agent.respondToPermission({
-          requestId: source.question.requestId,
-          response: {
-            behavior: "allow",
-            updatedInput: { answers: job.questionReply.answers },
-          },
-        });
-        source.question.status = "answered";
-        await this.store.save();
-      }
       if (job.questionReply.followUpAfter)
         await waitForAnswerTurn(
           api.agents.ref(id),
@@ -649,7 +697,7 @@ export class Bridge {
     } else if (job.dispatch !== "sent") {
       const agent = api.agents.ref(id);
       if (!job.dispatch) {
-        const current = await refreshLinkedAgent(agent);
+        let current = await refreshLinkedAgent(agent);
         if (
           !current ||
           current.agent.archivedAt ||
@@ -674,8 +722,12 @@ export class Bridge {
             throw new RoutingError(
               "The linked chat is waiting for a permission. Resolve it in Paseo, then send the message again.",
             );
+          current = await refreshLinkedAgent(agent);
         }
-        const timeline = await agent.timeline.refetch({ limit: 1 });
+        job.priorQuestionIds = current?.agent.pendingPermissions
+          ?.filter((value) => value.kind === "question")
+          .map((value) => value.id) ?? [];
+        const timeline = await agent.timeline.refetch({ direction: "tail", limit: 1 });
         job.after = {
           epoch: timeline.epoch,
           seq: Math.max(0, ...timeline.entries.map((entry) => entry.seqEnd)),
@@ -695,6 +747,14 @@ export class Bridge {
       job.dispatch = "sent";
       await this.store.save();
     }
+    // Older in-flight receipts have no pre-dispatch question snapshot. Their
+    // earlier receipts still prove which forms belong to previous requests.
+    job.priorQuestionIds ??= Object.entries(state.jobs).flatMap(
+      ([otherId, other]) =>
+        Number(otherId) < updateId && other.agentId === id && other.question
+          ? [other.question.requestId] : [],
+    );
+    const priorQuestions = new Set(job.priorQuestionIds);
     for (let switches = 0; switches < 3; switches++) {
       await progress.watch(api.agents.ref(id));
       const result = await waitForTask(
@@ -734,8 +794,10 @@ export class Bridge {
             /* The final response still includes a question not confirmed by Telegram. */
           }
         },
+        priorQuestions,
       );
       const question = result.final?.pendingPermissions
+        ?.filter((request) => !priorQuestions.has(request.id))
         ?.map(questionFrom)
         .find((value) => value !== undefined);
       if (question && job.question?.requestId !== question.requestId)

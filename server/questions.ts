@@ -97,6 +97,7 @@ export async function waitForTask(
   signal: AbortSignal,
   wait = pause,
   onAsyncQuestion?: (question: Question) => Promise<void>,
+  priorQuestions: ReadonlySet<string> = new Set(),
 ): Promise<Result> {
   while (!signal.aborted) {
     const result = await abortable(agent.waitForFinish(60_000), signal);
@@ -113,6 +114,7 @@ export async function waitForTask(
       return { ...result, status: "idle" };
     if (result.final?.status === "error") return { ...result, status: "error" };
     const question = permissions
+      .filter((request) => !priorQuestions.has(request.id))
       .map(questionFrom)
       .find((value) => value !== undefined);
     if (question && onAsyncQuestion) await onAsyncQuestion(question);

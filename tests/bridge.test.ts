@@ -858,7 +858,8 @@ test("native questions are answered only by a reply in the exact chat and topic"
     ({
       agent: {
         id: "question-agent",
-        status: "idle",
+        status: "running",
+        activeTurn: { turnId: "blocked-turn" },
         pendingPermissions: [
           {
             id: "question",
@@ -899,6 +900,154 @@ test("native questions are answered only by a reply in the exact chat and topic"
     response: { behavior: "allow", updatedInput: { answers: { Mode: "B" } } },
   });
   assert.equal(f.store.state.jobs[1].question!.status, "answered");
+  assert.equal(f.store.state.jobs[3].answer, "Done by question-agent");
+});
+
+test("a clarification reply unblocks its running task without waiting behind it", async () => {
+  const f = await fixture(config({ kind: "agent", agentId: "active", sharedHistory: false }));
+  const agent = f.api.agents.ref("active");
+  const permission = {
+    id: "live-question", kind: "question", name: "request_user_input_async",
+    input: { questions: [{ header: "Example", question: "Which example?", options: [] }] },
+  };
+  let answered = false;
+  const snapshot = () => ({
+    status: f.sent.length && !answered ? "running" : "idle",
+    activeTurn: f.sent.length && !answered ? { turnId: "turn" } : null,
+    pendingPermissions: f.sent.length && !answered ? [permission] : [],
+  });
+  agent.refresh = async () => ({ agent: { id: "active", ...snapshot() } }) as never;
+  agent.respondToPermission = async () => { answered = true; };
+  f.setWait(async () => ({
+    status: answered ? "idle" : "permission",
+    final: snapshot(), lastMessage: answered ? "Here is the example" : "Checking",
+  }));
+  const running = f.bridge.handle({ update_id: 1, message: message() });
+  try {
+    for (let n = 0; n < 100 && !f.store.state.jobs[1]?.question?.messageId; n++)
+      await new Promise(resolve => setTimeout(resolve, 5));
+    const formId = f.store.state.jobs[1]?.question?.messageId;
+    assert.ok(formId, "the active task must publish its question");
+    const reply = f.bridge.handle({ update_id: 2, message: {
+      ...message(), message_id: 102, text: "Any example",
+      reply_to_message: { message_id: formId, from: { id: 77 } },
+    } });
+    for (let n = 0; n < 60 && !answered; n++)
+      await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(answered, true, "a control reply must reach the agent before the original task can finish");
+    await Promise.all([running, reply]);
+    assert.equal(f.sent.length, 1, "the answer uses the native question RPC, not a second prompt");
+    assert.equal(f.store.state.jobs[1].answer, "Here is the example");
+    assert.match(f.store.state.jobs[2].answer!, /Answer received/);
+  } finally { await f.bridge.stop(); await running; }
+});
+
+test("an outstanding question from an earlier request is not reposted under a new task", async () => {
+  const f = await fixture(config({ kind: "agent", agentId: "existing", sharedHistory: false }));
+  const agent = f.api.agents.ref("existing");
+  const permission = {
+    id: "old-question", kind: "question", name: "request_user_input_async",
+    input: { questions: [{ header: "Old", question: "Unrelated old question?", options: [] }] },
+  };
+  agent.refresh = async () => ({ agent: {
+    id: "existing", status: "idle", activeTurn: null, pendingPermissions: [permission],
+  } }) as never;
+  let calls = 0;
+  f.setWait(async () => ({
+    status: "permission", lastMessage: ++calls === 1 ? "Working" : "New task answer",
+    final: { status: calls === 1 ? "running" : "idle", activeTurn: calls === 1 ? { turnId: "new" } : null, pendingPermissions: [permission] },
+  }));
+  await f.bridge.handle({ update_id: 1, message: message() });
+  assert.equal(f.store.state.jobs[1].answer, "New task answer");
+  assert.equal(f.store.state.jobs[1].question, undefined);
+  assert.equal(f.telegram.calls.filter(c => c.method === "sendMessage" && String(c.payload.text).startsWith("Clarification:")).length, 0);
+});
+
+test("a fresh question is still delivered when an older form remains pending", async () => {
+  const f = await fixture(config({ kind: "agent", agentId: "existing", sharedHistory: false }));
+  const agent = f.api.agents.ref("existing");
+  const old = { id: "old", kind: "question", name: "request_user_input_async", input: {
+    questions: [{ header: "Old", question: "Old question?", options: [] }],
+  } };
+  const fresh = { ...old, id: "fresh", input: { questions: [{ header: "New", question: "New question?", options: [] }] } };
+  agent.refresh = async () => ({ agent: { id: "existing", status: "idle", pendingPermissions: [old] } }) as never;
+  let calls = 0;
+  f.setWait(async () => ({ status: "permission", lastMessage: "Done", final: {
+    status: ++calls === 1 ? "running" : "idle", activeTurn: calls === 1 ? { turnId: "turn" } : null,
+    pendingPermissions: [old, fresh],
+  } }));
+  await f.bridge.handle({ update_id: 1, message: message() });
+  const forms = f.telegram.calls.filter(c => c.method === "sendMessage" && String(c.payload.text).startsWith("Clarification:"));
+  assert.equal(forms.length, 1);
+  assert.match(String(forms[0].payload.text), /New question/);
+  assert.equal(f.store.state.jobs[1].question?.requestId, "fresh");
+});
+
+test("an idle asynchronous question resumes a follow-up and returns its new final answer", async () => {
+  const f = await fixture();
+  const agent = f.api.agents.ref("idle-question");
+  agent.refresh = async () => ({ agent: { id: "idle-question", status: "idle", activeTurn: null,
+    pendingPermissions: [{ id: "question", kind: "question", name: "request_user_input_async", input: {} }],
+  } }) as never;
+  let replies = 0;
+  agent.respondToPermission = async () => {
+    replies++;
+    f.histories.set("idle-question", [{ seqEnd: 1, item: { type: "user_message" } }]);
+  };
+  f.store.state.jobs[1] = {
+    agentId: "idle-question", destination: { chatId: -100, topicId: 0 }, delivery: "done",
+    question: { requestId: "question", fields: [{ header: "Mode", text: "Choose", options: [] }], status: "pending", messageId: 99 },
+  };
+  await f.bridge.handle({ update_id: 2, message: { ...message(), text: "Example", reply_to_message: { message_id: 99, from: { id: 77 } } } });
+  assert.equal(replies, 1);
+  assert.equal(f.store.state.jobs[2].answer, "Done by idle-question");
+  assert.equal(f.sent.length, 0);
+});
+
+test("an interrupted question response is never replayed or falsely acknowledged", async () => {
+  const f = await fixture();
+  f.store.state.jobs[1] = {
+    agentId: "question-agent", destination: { chatId: -100, topicId: 0 }, delivery: "done",
+    question: { requestId: "question", fields: [{ header: "Mode", text: "Choose", options: [] }], status: "responding", messageId: 99 },
+  };
+  const reply = { ...message(), text: "Example", reply_to_message: { message_id: 99, from: { id: 77 } } };
+  f.store.state.jobs[2] = {
+    agentId: "question-agent", message: reply,
+    questionReply: { sourceJobId: "1", answers: { Mode: "Example" }, attempted: true, continuesInPlace: true },
+  };
+  await f.bridge.handle({ update_id: 2, message: reply });
+  assert.match(f.store.state.jobs[2].answer!, /could not be confirmed/);
+  assert.equal(f.sent.length, 0);
+});
+
+test("a repeated reply to a completed question is not dispatched as a new prompt", async () => {
+  const f = await fixture();
+  f.store.state.jobs[1] = {
+    agentId: "question-agent", destination: { chatId: -100, topicId: 0 }, delivery: "done",
+    question: { requestId: "question", fields: [{ header: "Mode", text: "Choose", options: [] }], status: "answered", messageId: 99 },
+  };
+  await f.bridge.handle({ update_id: 2, message: { ...message(), text: "Example", reply_to_message: { message_id: 99, from: { id: 77 } } } });
+  assert.match(f.store.state.jobs[2].answer!, /already been answered/);
+  assert.equal(f.sent.length, 0);
+});
+
+test("recovery does not repost an old form from pre-upgrade task receipts", async () => {
+  const f = await fixture();
+  const permission = { id: "old", kind: "question", name: "request_user_input_async", input: {
+    questions: [{ header: "Old", question: "Old question?", options: [] }],
+  } };
+  f.store.state.jobs[1] = {
+    agentId: "existing", delivery: "done",
+    question: { requestId: "old", fields: [{ header: "Old", text: "Old question?", options: [] }], status: "pending", messageId: 99 },
+  };
+  f.store.state.jobs[2] = { agentId: "existing", dispatch: "sent", after: { epoch: "epoch", seq: 0 } };
+  f.setWait(async () => ({ status: "permission", lastMessage: "Current result", final: {
+    status: "idle", activeTurn: null, pendingPermissions: [permission],
+  } }));
+  await f.bridge.handle({ update_id: 2, message: message() });
+  assert.equal(f.store.state.jobs[2].answer, "Current result");
+  assert.equal(f.store.state.jobs[2].question, undefined);
+  assert.equal(f.sent.length, 0);
 });
 
 test("a demoted admin cannot answer a native question, and the owner can still answer it", async () => {

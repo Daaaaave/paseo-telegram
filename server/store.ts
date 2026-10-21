@@ -27,6 +27,7 @@ export interface Job {
   routeKey?: string;
   dispatch?: "sending" | "sent";
   after?: { epoch: string; seq: number };
+  priorQuestionIds?: string[];
   destination?: { chatId: number; topicId: number };
   question?: Question;
   questionReply?: {
@@ -34,6 +35,7 @@ export interface Job {
     answers: Record<string, string>;
     attempted?: boolean;
     followUpAfter?: { epoch: string; seq: number };
+    continuesInPlace?: boolean;
   };
   sync?: SyncReport;
   failure?: "agent_request_failed" | "agent_error" | "missing_final_answer";
@@ -62,6 +64,7 @@ const jobSchema: z.ZodType<Job> = z.object({
   routeKey: z.string().optional(),
   dispatch: z.enum(["sending", "sent"]).optional(),
   after: z.object({ epoch: z.string(), seq: z.number() }).optional(),
+  priorQuestionIds: z.array(z.string()).optional(),
   destination: z
     .object({
       chatId: z.number().int().safe(),
@@ -77,6 +80,7 @@ const jobSchema: z.ZodType<Job> = z.object({
       followUpAfter: z
         .object({ epoch: z.string(), seq: z.number() })
         .optional(),
+      continuesInPlace: z.boolean().optional(),
     })
     .optional(),
   sync: z
