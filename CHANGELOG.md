@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Resume dormant saved Paseo chats before Git synchronization, request dispatch,
+  or clarification replies. A non-resident `closed` session is no longer mistaken
+  for a busy or unavailable agent. Archived chats remain unavailable.
+
 ## 0.2.1
 
 - Remove the Paseo version restriction so daemon and app updates do not block

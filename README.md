@@ -174,6 +174,11 @@ Telegram messages** pauses reception/delivery while keeping chats and pending
 requests. It does not stop running agents. Disconnecting removes the saved token
 and connection configuration; it keeps chat history and worktrees.
 
+Saved chats that are not currently loaded resume automatically before readiness
+and Git checks. You do not need to open the Paseo chat first after a daemon
+restart. Archived chats remain unavailable; running tasks and permission requests
+keep their normal queue and attention behavior.
+
 ```sh
 paseo plugin update telegram
 ```

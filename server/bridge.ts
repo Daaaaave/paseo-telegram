@@ -23,6 +23,7 @@ import {
 } from "./questions.ts";
 import { AgentQueue, Router } from "./routing.ts";
 import { syncIncompleteReply, syncIsComplete } from "./sync.ts";
+import { refreshLinkedAgent } from "./agents.ts";
 
 const FALLBACK =
   "The task needs attention in Paseo. Check its chat before sending the request again.";
@@ -597,7 +598,7 @@ export class Bridge {
         if (!source?.question || source.question.status !== "pending")
           return "This question has already been answered. Send a new message to continue.";
         const agent = api.agents.ref(id),
-          snapshot = await agent.refresh();
+          snapshot = await refreshLinkedAgent(agent);
         const request = snapshot?.agent.pendingPermissions?.find(
           (request) =>
             request.id === source.question!.requestId &&
@@ -648,7 +649,7 @@ export class Bridge {
     } else if (job.dispatch !== "sent") {
       const agent = api.agents.ref(id);
       if (!job.dispatch) {
-        const current = await agent.refresh();
+        const current = await refreshLinkedAgent(agent);
         if (
           !current ||
           current.agent.archivedAt ||

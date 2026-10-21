@@ -6,6 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { synchronizeWorktree, syncIsComplete } from "../server/sync.ts";
+import { Router, routeIdentity } from "../server/routing.ts";
+import { BotsAdapter } from "../server/bots.ts";
+import { Store, type Job } from "../server/store.ts";
+import { connectionSchema } from "../shared/config.ts";
+import type { PaseoApi } from "@getpaseo/client";
+import type { TelegramMessage } from "../shared/telegram.ts";
 
 const run = promisify(execFile);
 const branch = "bots/telegram-support-test";
@@ -70,6 +76,42 @@ test("a new message fetches remote changes and fast-forwards only its clean bot 
     "the main checkout is untouched",
   );
   assert.equal((await synchronizeWorktree(f.folder, branch)).reason, "current");
+});
+
+test("Git synchronization resumes a dormant agent before requiring it to be idle", async (t) => {
+  const f = await fixture(t);
+  const upstream = await f.update();
+  const config = connectionSchema.parse({
+    id: "00000000-0000-4000-8000-000000000001", name: "Fixture", enabled: true,
+    botId: 77, username: "demo_help_bot", revision: 0, policy: {}, bindings: {},
+    target: { kind: "workspace", workspaceId: "workspace", git: { remote: "origin", branch: "main" },
+      profile: { kind: "custom", provider: "example/model", systemPrompt: "Help" } },
+  });
+  const identity = routeIdentity(config.id, "-100:0", config.target!);
+  const store = new Store(join(f.folder, "..", "connector"));
+  store.state.agents[identity.key] = identity.agentId;
+  store.state.conversations[identity.key] = {
+    key: "-100:0", title: "Fixture", agentId: identity.agentId,
+    workspaceId: "workspace", routeKey: identity.key, folder: f.folder, branch,
+  };
+  let loaded = false;
+  const agent = {
+    refresh: async () => ({ agent: { id: identity.agentId, cwd: f.folder,
+      status: loaded ? "idle" : "closed", activeTurn: null, archivedAt: null } }),
+    timeline: { refetch: async () => { loaded = true; return { entries: [], error: null }; } },
+    send: () => assert.fail("Preparation must not send the request"),
+  };
+  const api = { agents: { ref: () => agent } } as unknown as PaseoApi;
+  const router = new Router(api, new BotsAdapter(async () => null, null), store, () => config);
+  const job: Job = {};
+  const message: TelegramMessage = { message_id: 1, date: 100,
+    chat: { id: -100, type: "supergroup" }, from: { id: 10 }, text: "Check current code" };
+  const prepared = await router.prepare(message, job);
+  assert.equal(prepared.id, identity.agentId);
+  assert.equal(loaded, true);
+  assert.equal(job.sync?.state, "ready");
+  assert.equal(job.sync?.reason, "fast_forward");
+  assert.equal(await git(f.folder, "rev-parse", "HEAD"), upstream);
 });
 
 test("divergent committed work merges main without rewriting the bot commit", async (t) => {

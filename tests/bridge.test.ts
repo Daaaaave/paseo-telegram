@@ -241,6 +241,41 @@ test("existing chat binding preserves the agent and requires explicit cross-conv
   assert.equal(f.sent[1].id, "original");
 });
 
+test("a saved non-resident chat resumes before receiving its next Telegram request", async () => {
+  const f = await fixture(config({ kind: "agent", agentId: "saved", sharedHistory: false }));
+  const agent = f.api.agents.ref("saved");
+  const snapshot = (await agent.refresh())!;
+  const refetch = agent.timeline.refetch;
+  let loaded = false;
+  agent.refresh = async () => ({ ...snapshot, agent: { ...snapshot.agent, status: loaded ? "idle" : "closed" } });
+  agent.timeline.refetch = async (options) => {
+    loaded = true;
+    return refetch(options);
+  };
+  await f.bridge.handle({ update_id: 1, message: message(-100) });
+  assert.equal(f.sent.length, 1);
+  assert.equal(f.sent[0].id, "saved");
+  assert.equal(f.store.state.jobs[1].dispatch, "sent");
+  assert.equal(f.store.state.jobs[1].failure, undefined);
+});
+
+test("a reused workspace chat resumes before dispatch without creating another agent", async () => {
+  const f = await fixture();
+  await f.bridge.handle({ update_id: 1, message: message(-100) });
+  const agent = f.api.agents.ref(f.sent[0].id);
+  const snapshot = (await agent.refresh())!;
+  const refetch = agent.timeline.refetch;
+  let loaded = false;
+  agent.refresh = async () => ({ ...snapshot, agent: { ...snapshot.agent, status: loaded ? "idle" : "closed" } });
+  agent.timeline.refetch = async (options) => { loaded = true; return refetch(options); };
+  await f.bridge.handle({ update_id: 2, message: message(-100) });
+  assert.equal(f.created.length, 1);
+  assert.equal(f.sent.length, 2);
+  assert.equal(f.sent[0].id, f.sent[1].id);
+  assert.equal(f.store.state.jobs[2].dispatch, "sent");
+  assert.equal(f.store.state.jobs[2].failure, undefined);
+});
+
 test("a group-specific route overrides the default without touching other groups", async () => {
   const f = await fixture();
   f.connection.bindings["-100:0"] = {

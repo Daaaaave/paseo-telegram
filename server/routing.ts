@@ -10,6 +10,7 @@ import type { Store, Job, State } from "./store.ts";
 import { BotsAdapter } from "./bots.ts";
 import { synchronizeWorktree, syncContext, syncBlockedReply } from "./sync.ts";
 import { waitForTask } from "./questions.ts";
+import { refreshLinkedAgent } from "./agents.ts";
 
 const run = promisify(execFile);
 export function isCurrentRoute(
@@ -151,7 +152,7 @@ export class Router {
           "This Paseo chat is already bound to another Telegram conversation. Enable shared history explicitly or choose a different chat.",
         );
       id = target.agentId;
-      const snapshot = await this.api.agents.ref(id).refresh();
+      const snapshot = await refreshLinkedAgent(this.api.agents.ref(id));
       if (
         !snapshot ||
         snapshot.agent.archivedAt ||
@@ -277,7 +278,7 @@ export class Router {
       const checkout = state.conversations[identity.key];
       if (!checkout?.folder || !checkout.branch)
         throw new UserFacingError("The linked Git worktree is unavailable");
-      const current = await this.api.agents.ref(id).refresh();
+      const current = await refreshLinkedAgent(this.api.agents.ref(id));
       if (
         current?.agent.activeTurn ||
         current?.agent.status === "running" ||
