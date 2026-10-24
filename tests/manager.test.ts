@@ -146,6 +146,20 @@ test("legacy policies keep owner-only admission, and old save payloads cannot re
   }
 });
 
+test("older clients cannot erase separately configured approval users", async () => {
+  const f = await pendingFixture();
+  try {
+    const saved = await f.manager.save({ ...f.config, policy: { ...f.config.policy, approvers: [20] } });
+    const { approvers, groupAdmission, ...legacy } = saved.policy;
+    const { botId, username, ...payload } = saved;
+    const input = saveRpc.input.parse({ ...payload, policy: legacy });
+    const updated = await f.manager.save(input);
+    assert.deepEqual(updated.policy.approvers, [20]);
+    assert.equal(updated.policy.groupAdmission, "approval");
+    assert.deepEqual(policySchema.parse({}).approvers, []);
+  } finally { await f.manager.stop(); }
+});
+
 test("group review requires pairing and the saved approval policy, and accepts only safe group IDs", async () => {
   for (const paired of [false, true]) {
     const f = await pendingFixture();

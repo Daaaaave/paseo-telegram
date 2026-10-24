@@ -38,7 +38,7 @@ export function publicProgress(text: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
     .replace(/^\s*(?:---\s*)+/g, "");
   if (
-    /(?:token|password|secret|authorization|api[_ -]?key|токен|пароль)\s*[:=]|\b(?:sk-|glpat-|ghp_|github_pat_)|\b\d{6,}:[\w-]+|\bBearer\s|https?:\/\/[^\s/]+:[^\s/@]+@/i.test(
+    /(?:token|password|secret|authorization|credential|cookie|private[_ -]?key|api[_ -]?key|токен|пароль)["']?\s*[:=]|\b(?:sk-|glpat-|ghp_|github_pat_|npm_)|\b\d{6,}:[\w-]+|\bBearer\s|BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY|https?:\/\/[^\s/]+:[^\s/@]+@/i.test(
       clean,
     )
   )
@@ -46,10 +46,11 @@ export function publicProgress(text: string): string {
   return [...clean].slice(0, 700).join("").trim();
 }
 
-/** Repeating an edit is idempotent; repeating an uncertain new message is not. */
+/** Legacy receipts only: repeating an edit is idempotent, a new send is not. */
 export function canResumeFinalEdit(job: Job): boolean {
   return (
     job.delivery === "sending" &&
+    job.finalReply?.mode !== "new" &&
     Boolean(job.progress?.messageId) &&
     !job.progress?.replacementAttempted &&
     Boolean(job.answer) &&
@@ -255,6 +256,7 @@ export class ProgressMessage {
     this.dispose();
     await this.inFlight;
   }
+  /** Only interrupted pre-0.3.1 deliveries still replace the old progress. */
   async finish(
     firstChunk: string,
     entities: TextEntity[] = [],

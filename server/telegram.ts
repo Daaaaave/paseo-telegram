@@ -103,7 +103,7 @@ export class Telegram {
     signal?: AbortSignal,
   ): Promise<T> {
     if (
-      (method === "sendMessage" || method === "editMessageText") &&
+      ["sendMessage", "editMessageText", "deleteMessages"].includes(method) &&
       typeof payload.chat_id === "number"
     ) {
       return this.outbox.run(

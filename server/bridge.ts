@@ -24,6 +24,10 @@ import {
 import { AgentQueue, Router } from "./routing.ts";
 import { syncIncompleteReply, syncIsComplete } from "./sync.ts";
 import { refreshLinkedAgent } from "./agents.ts";
+import { GroupSetup } from "./group-setup.ts";
+import { groupAccessText, groupInviteUrl } from "../shared/group-setup.ts";
+import { Approvals } from "./approvals.ts";
+import { TaskMessages } from "./messages.ts";
 
 const FALLBACK =
   "The task needs attention in Paseo. Check its chat before sending the request again.";
@@ -49,6 +53,9 @@ export class Bridge {
   readonly telegram: Telegram;
   readonly store: Store;
   readonly router: Router;
+  readonly groupSetup: GroupSetup;
+  readonly approvals: Approvals;
+  readonly messages: TaskMessages;
   private readonly connection: () => Connection;
   private readonly queue: AgentQueue;
   constructor(
@@ -57,12 +64,19 @@ export class Bridge {
     router: Router,
     connection: () => Connection,
     queue: AgentQueue,
+    setMode?: (agentId: string, modeId: string) => Promise<unknown>,
   ) {
     this.telegram = telegram;
     this.store = store;
     this.router = router;
     this.connection = connection;
     this.queue = queue;
+    this.groupSetup = new GroupSetup(telegram, store, connection, this.signal);
+    this.messages = new TaskMessages(telegram, store, this.signal);
+    this.approvals = new Approvals({
+      telegram, store, api: router.api, queue, connection,
+      signal: this.signal, setMode, messages: this.messages, authorized: (message) => this.authorized(message),
+    });
   }
   get queued() {
     return this.tasks.size;
@@ -126,6 +140,7 @@ export class Bridge {
       ...(this.lifetime ? [this.lifetime] : []),
       ...this.tasks.values(),
     ]);
+    await this.messages.settle();
   }
   async followContinuation(previous: string, id: string): Promise<void> {
     for (const [key, current] of Object.entries(this.store.state.agents))
@@ -175,20 +190,38 @@ export class Bridge {
       return;
     }
     for (const [id, job] of Object.entries(this.store.state.jobs)) {
-      if (canResumeFinalEdit(job)) delete job.delivery;
+      if (canResumeFinalEdit(job) && job.message) {
+        job.finalReply ??= { mode: "legacy-edit", messageIds: [], replyToMessageId: job.message.message_id };
+        job.finalReply.sending = false;
+        delete job.delivery;
+        await this.store.save();
+      } else if (job.delivery === "sending") {
+        if (job.finalReply?.mode === "new" && !job.finalReply.sending)
+          delete job.delivery;
+        else job.delivery = "uncertain";
+        await this.store.save();
+      }
+      // Old permission cards have confirmed ownership; old progress may be the final answer.
+      if (job.temporaryMessageIds === undefined && job.approval?.messageId)
+        await this.messages.track(job, job.approval.messageId);
+      else await this.messages.cleanup(job);
+      await this.linkAcknowledgement(job);
       if (job.message && !job.delivery)
         void this.enqueue(Number(id), job.message);
     }
     while (!this.signal.aborted) {
       try {
+        for (const job of Object.values(this.store.state.jobs))
+          void this.messages.cleanup(job).catch(() => {});
         await this.reconcilePendingGroups();
+        await this.groupSetup.refresh();
         const updates = await this.telegram.call<TelegramUpdate[]>(
           "getUpdates",
           {
             offset: this.store.state.offset,
             timeout: 25,
             limit: 20,
-            allowed_updates: ["message", "my_chat_member"],
+            allowed_updates: ["message", "my_chat_member", "callback_query"],
           },
           this.signal,
         );
@@ -201,6 +234,7 @@ export class Bridge {
               const job = this.store.state.jobs[key];
               return (
                 !!job.delivery &&
+                (!job.temporaryMessageIds?.length || job.cleanup?.abandoned || !!job.failure || job.delivery !== "done") &&
                 (!job.question || job.question.status === "answered")
               );
             })
@@ -237,6 +271,7 @@ export class Bridge {
   private async reconcilePendingGroups(): Promise<void> {
     if (this.store.state.ownerId === null) return;
     for (const id of Object.keys(this.store.state.pendingGroups)) {
+      let admitted = false;
       await this.store.withGroups(async () => {
         const state = this.store.state,
           group = state.pendingGroups[id];
@@ -247,8 +282,10 @@ export class Bridge {
           group.addedBy,
         );
         if (decision === "pending") return;
-        if (decision === "admit") state.groups[id] = group;
-        else {
+        if (decision === "admit") {
+          state.groups[id] = group;
+          admitted = true;
+        } else {
           delete state.groups[id];
           await this.store.save();
           try {
@@ -268,16 +305,64 @@ export class Bridge {
         delete state.pendingGroups[id];
         await this.store.save();
       });
+      if (admitted) await this.notifyGroupSetup(id);
+    }
+  }
+  private groupButton(text = "Add to group") {
+    return {
+      inline_keyboard: [
+        [
+          {
+            text,
+            url: groupInviteUrl(this.connection().username),
+          },
+        ],
+      ],
+    };
+  }
+  private async notifyGroupSetup(id: string): Promise<void> {
+    if (!this.store.state.groups[id]) return;
+    await this.groupSetup.refresh(true);
+    if (!this.store.state.groups[id] || !this.connection().enabled || this.signal.aborted) return;
+    const config = this.connection(),
+      access = this.groupSetup.access(id);
+    try {
+      await this.telegram.call(
+        "sendMessage",
+        {
+          chat_id: Number(id),
+          text:
+            access === "ready"
+              ? `Group message access is ready. ${
+                  config.policy.invocation === "all"
+                    ? "Authorized messages can now reach Paseo."
+                    : `Mention @${config.username}, use /ask@${config.username} followed by your question, or reply to one of the bot's messages.`
+                } Requests follow the destinations and permissions saved in Paseo.`
+              : groupAccessText(config.username, access),
+          ...(access !== "ready"
+            ? { reply_markup: this.groupButton("Fix group access") }
+            : {}),
+        },
+        this.signal,
+      );
+    } catch {
+      // A setup notice is optional; inability to send must not stop reception.
+      // The same access diagnosis remains available in the Paseo settings.
     }
   }
   async handle(update: TelegramUpdate, background = false): Promise<void> {
     const config = this.connection();
     if (!config.enabled) return;
+    if (update.callback_query) {
+      await this.approvals.callback(update.callback_query);
+      return;
+    }
     const state = this.store.state;
     const membership = update.my_chat_member;
     if (membership && isGroup(membership.chat)) {
+      const key = String(membership.chat.id);
+      this.groupSetup.observe(key, membership.new_chat_member);
       await this.store.withGroups(async () => {
-        const key = String(membership.chat.id);
         if (!isMember(membership.new_chat_member)) {
           delete state.groups[key];
           delete state.pendingGroups[key];
@@ -304,6 +389,11 @@ export class Bridge {
         await this.store.save();
       });
       await this.reconcilePendingGroups();
+      if (
+        state.groups[key] &&
+        membership.old_chat_member.status !== membership.new_chat_member.status
+      )
+        await this.notifyGroupSetup(key);
       return;
     }
     const message = update.message;
@@ -331,6 +421,7 @@ export class Bridge {
           text: this.router.target(message)
             ? "Owner confirmed. This conversation already has a saved Paseo destination — send a message to the agent. Replies use your Paseo provider or subscription. Group admission follows the policy saved in Paseo."
             : "Owner confirmed. Agent replies need a saved chat or workspace. Return to Paseo → Telegram, choose a destination and select Save settings. Replies use your Paseo provider or subscription. Group admission follows the policy saved in Paseo.",
+          reply_markup: this.groupButton(),
         },
         this.signal,
       );
@@ -357,6 +448,7 @@ export class Bridge {
       return;
     }
     if (!message.text?.trim() || message.text.length > 12_000) return;
+    if (await this.approvals.command(message)) return;
     const setupCommand = /^\/(?:start|status)(?:@(\w+))?(?:\s|$)/i.exec(
       message.text ?? "",
     );
@@ -396,13 +488,27 @@ export class Bridge {
     }
     if (!(await this.authorized(message))) return;
     if (addressedSetup) {
+      if (isGroup(message.chat)) await this.groupSetup.refresh(true);
+      const access = isGroup(message.chat)
+        ? this.groupSetup.access(String(message.chat.id))
+        : "ready";
       await this.telegram.call(
         "sendMessage",
         {
           chat_id: message.chat.id,
-          text: this.router.target(message)
-            ? "Ready: this conversation has a saved Paseo destination. Send a message to the agent. In groups, mention this bot or reply to one of its messages. The model provider must work in Paseo."
-            : "Setup incomplete. This conversation has no Paseo destination. Open Paseo → Telegram, choose a chat or workspace and select Save settings. The bot cannot request agent replies until a destination is saved.",
+          text:
+            access !== "ready"
+              ? groupAccessText(config.username, access)
+              : this.router.target(message)
+                ? "Ready: this conversation has a saved Paseo destination. Send a message to the agent. In groups, mention this bot or reply to one of its messages. The model provider must work in Paseo."
+                : "Setup incomplete. This conversation has no Paseo destination. Open Paseo → Telegram, choose a chat or workspace and select Save settings. The bot cannot request agent replies until a destination is saved.",
+          ...(access !== "ready" || message.chat.type === "private"
+            ? {
+                reply_markup: this.groupButton(
+                  access !== "ready" ? "Fix group access" : "Add to group",
+                ),
+              }
+            : {}),
           ...(message.message_thread_id
             ? { message_thread_id: message.message_thread_id }
             : {}),
@@ -501,6 +607,8 @@ export class Bridge {
     }
     const progress = this.progressFor(updateId, message);
     await progress.ensure();
+    if (job.finalReply?.mode !== "legacy-edit" && job.progress?.messageId)
+      await this.messages.track(job, job.progress.messageId);
     progress.start();
     if (!job.answer) {
       try {
@@ -522,30 +630,14 @@ export class Bridge {
       return;
     }
     await progress.stop();
+    job.finalReply ??= {
+      mode: "new", messageIds: [], replyToMessageId: message.message_id,
+      service: job.questionReply?.continuesInPlace === true,
+    };
     job.delivery = "sending";
     await this.store.save();
     try {
-      const [first, ...rest] = formatReply(job.answer || FALLBACK);
-      let lastMessageId = await progress.finish(first.text, first.entities);
-      for (const content of rest) {
-        const sent = await this.telegram.call<{ message_id: number }>(
-          "sendMessage",
-          {
-            chat_id: message.chat.id,
-            ...content,
-            ...(message.message_thread_id
-              ? { message_thread_id: message.message_thread_id }
-              : {}),
-            reply_parameters: {
-              message_id: message.message_id,
-              allow_sending_without_reply: true,
-            },
-            link_preview_options: { is_disabled: true },
-          },
-          this.signal,
-        );
-        lastMessageId = sent.message_id;
-      }
+      const lastMessageId = await this.messages.final(job, message, (first) => progress.finish(first.text, first.entities));
       if (
         job.question &&
         !job.question.messageId &&
@@ -561,6 +653,20 @@ export class Bridge {
     }
     delete job.message;
     await this.store.save();
+    if (job.delivery === "done") {
+      await this.linkAcknowledgement(job);
+      await this.messages.cleanup(job);
+    }
+  }
+  private async linkAcknowledgement(job: Job): Promise<void> {
+    if (job.delivery !== "done" || !job.finalReply?.service || !job.questionReply || job.questionReply.acknowledgementLinked) return;
+    const source = this.store.state.jobs[job.questionReply.sourceJobId];
+    if (source?.destination && job.destination &&
+        source.destination.chatId === job.destination.chatId && source.destination.topicId === job.destination.topicId) {
+      for (const id of job.finalReply.messageIds) await this.messages.track(source, id);
+      job.questionReply.acknowledgementLinked = true;
+      await this.store.save();
+    }
   }
   private async answer(
     message: TelegramMessage,
@@ -706,7 +812,7 @@ export class Bridge {
           throw new RoutingError("The linked Paseo chat is unavailable.");
         if (
           current.agent.pendingPermissions?.some(
-            (value) => value.name !== "request_user_input_async",
+            (value) => value.kind === "question" && value.name !== "request_user_input_async",
           )
         )
           throw new RoutingError(
@@ -714,10 +820,13 @@ export class Bridge {
           );
         if (
           current.agent.activeTurn ||
+          current.agent.pendingPermissions?.some((request) => request.kind !== "question") ||
           current.agent.status === "running" ||
           current.agent.status === "initializing"
         ) {
-          const previous = await waitForTask(agent, this.signal);
+          const previous = await this.waitOnAgent(job, message, id, new Set(
+            current.agent.pendingPermissions?.filter((value) => value.kind === "question").map((value) => value.id),
+          ));
           if (previous.status === "permission")
             throw new RoutingError(
               "The linked chat is waiting for a permission. Resolve it in Paseo, then send the message again.",
@@ -757,45 +866,7 @@ export class Bridge {
     const priorQuestions = new Set(job.priorQuestionIds);
     for (let switches = 0; switches < 3; switches++) {
       await progress.watch(api.agents.ref(id));
-      const result = await waitForTask(
-        api.agents.ref(id),
-        this.signal,
-        undefined,
-        async (question) => {
-          if (
-            job.question?.requestId === question.requestId &&
-            job.question.notificationAttempted
-          )
-            return;
-          job.question = { ...question, notificationAttempted: true };
-          await this.store.save();
-          try {
-            for (const content of formatReply(questionText(question))) {
-              const sent = await this.telegram.call<{ message_id: number }>(
-                "sendMessage",
-                {
-                  chat_id: message.chat.id,
-                  ...content,
-                  ...(message.message_thread_id
-                    ? { message_thread_id: message.message_thread_id }
-                    : {}),
-                  reply_parameters: {
-                    message_id: message.message_id,
-                    allow_sending_without_reply: true,
-                  },
-                  link_preview_options: { is_disabled: true },
-                },
-                this.signal,
-              );
-              job.question.messageId = sent.message_id;
-            }
-            await this.store.save();
-          } catch {
-            /* The final response still includes a question not confirmed by Telegram. */
-          }
-        },
-        priorQuestions,
-      );
+      const result = await this.waitOnAgent(job, message, id, priorQuestions);
       const question = result.final?.pendingPermissions
         ?.filter((request) => !priorQuestions.has(request.id))
         ?.map(questionFrom)
@@ -836,6 +907,34 @@ export class Bridge {
       id = job.agentId!;
     }
     return FALLBACK;
+  }
+  private async waitOnAgent(job: Job, message: TelegramMessage, id: string, priorQuestions: ReadonlySet<string>) {
+    const result = await waitForTask(this.router.api.agents.ref(id), this.signal, undefined,
+      async (question) => {
+        if (job.question?.requestId === question.requestId && job.question.notificationAttempted) return;
+        job.question = { ...question, notificationAttempted: true };
+        await this.store.save();
+        try {
+          for (const content of formatReply(questionText(question))) {
+            const sent = await this.telegram.call<{ message_id: number }>("sendMessage", {
+              chat_id: message.chat.id, ...content,
+              ...(message.message_thread_id ? { message_thread_id: message.message_thread_id } : {}),
+              reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+              link_preview_options: { is_disabled: true },
+            }, this.signal);
+            job.question.messageId = sent.message_id;
+          }
+          await this.store.save();
+        } catch { /* A final response still includes a question not confirmed by Telegram. */ }
+      }, priorQuestions,
+      async (requests) => {
+        if (!(await this.authorized(message))) throw new RoutingError("This conversation is no longer authorized.");
+        try { await this.approvals.show(job, requests); }
+        catch { this.lastError = "The approval card could not be confirmed by Telegram. The task is still waiting for a decision."; }
+      },
+    );
+    if (result.status !== "permission") await this.approvals.show(job, []);
+    return result;
   }
 }
 class RoutingError extends Error {}

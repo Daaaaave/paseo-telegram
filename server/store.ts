@@ -19,6 +19,25 @@ const questionSchema = z.object({
   notificationAttempted: z.boolean().optional(),
 });
 export type Question = z.output<typeof questionSchema>;
+const approvalSchema = z.object({
+  agentId: z.string(),
+  token: z.string().regex(/^[a-f0-9]{32}$/),
+  messageId: z.number().int().positive().optional(),
+  attempted: z.boolean().default(false),
+  requests: z
+    .array(z.object({ id: z.string(), fingerprint: z.string() }))
+    .max(100),
+  text: z.string(),
+  closed: z.boolean().default(false),
+});
+const approvalAttemptSchema = z.object({
+  agentId: z.string(),
+  fingerprint: z.string(),
+  action: z.string(),
+  actor: z.number().int().safe(),
+  at: z.number(),
+  status: z.enum(["sending", "confirmed", "uncertain"]),
+});
 export interface Job {
   message?: TelegramMessage;
   agentId?: string;
@@ -28,6 +47,15 @@ export interface Job {
   dispatch?: "sending" | "sent";
   after?: { epoch: string; seq: number };
   priorQuestionIds?: string[];
+  approval?: z.output<typeof approvalSchema>;
+  approvalAttempts?: Record<string, z.output<typeof approvalAttemptSchema>>;
+  modeGrant?: {
+    agentId: string;
+    modeId: string;
+    actor: number;
+    at: number;
+    confirmed: boolean;
+  };
   destination?: { chatId: number; topicId: number };
   question?: Question;
   questionReply?: {
@@ -36,6 +64,7 @@ export interface Job {
     attempted?: boolean;
     followUpAfter?: { epoch: string; seq: number };
     continuesInPlace?: boolean;
+    acknowledgementLinked?: boolean;
   };
   sync?: SyncReport;
   failure?: "agent_request_failed" | "agent_error" | "missing_final_answer";
@@ -46,6 +75,15 @@ export interface Job {
     replacementAttempted?: boolean;
   };
   delivery?: "sending" | "done" | "uncertain" | "canceled";
+  finalReply?: {
+    mode: "new" | "legacy-edit";
+    messageIds: number[];
+    replyToMessageId: number;
+    sending?: boolean;
+    service?: boolean;
+  };
+  temporaryMessageIds?: number[];
+  cleanup?: { attempts: number; retryAt: number; abandoned?: boolean };
 }
 const jobSchema: z.ZodType<Job> = z.object({
   message: z
@@ -65,6 +103,17 @@ const jobSchema: z.ZodType<Job> = z.object({
   dispatch: z.enum(["sending", "sent"]).optional(),
   after: z.object({ epoch: z.string(), seq: z.number() }).optional(),
   priorQuestionIds: z.array(z.string()).optional(),
+  approval: approvalSchema.optional(),
+  approvalAttempts: z.record(z.string(), approvalAttemptSchema).optional(),
+  modeGrant: z
+    .object({
+      agentId: z.string(),
+      modeId: z.string(),
+      actor: z.number().int().safe(),
+      at: z.number(),
+      confirmed: z.boolean(),
+    })
+    .optional(),
   destination: z
     .object({
       chatId: z.number().int().safe(),
@@ -81,6 +130,7 @@ const jobSchema: z.ZodType<Job> = z.object({
         .object({ epoch: z.string(), seq: z.number() })
         .optional(),
       continuesInPlace: z.boolean().optional(),
+      acknowledgementLinked: z.boolean().optional(),
     })
     .optional(),
   sync: z
@@ -103,6 +153,23 @@ const jobSchema: z.ZodType<Job> = z.object({
     })
     .optional(),
   delivery: z.enum(["sending", "done", "uncertain", "canceled"]).optional(),
+  finalReply: z
+    .object({
+      mode: z.enum(["new", "legacy-edit"]),
+      messageIds: z.array(z.number().int().safe().positive()),
+      replyToMessageId: z.number().int().safe(),
+      sending: z.boolean().optional(),
+      service: z.boolean().optional(),
+    })
+    .optional(),
+  temporaryMessageIds: z.array(z.number().int().safe().positive()).optional(),
+  cleanup: z
+    .object({
+      attempts: z.number().int().nonnegative(),
+      retryAt: z.number(),
+      abandoned: z.boolean().optional(),
+    })
+    .optional(),
 });
 const groupSchema = z.object({
   title: z.string(),

@@ -14,12 +14,14 @@ or separate hosting is required.
    **Start** to confirm the owner.
 3. Choose an existing Paseo chat, or a workspace with a provider/model or optional
    Bots profile. Set who can use it and select **Save settings**.
-4. Message the bot privately, or add it to a group from the paired account.
+4. Message the bot privately, or select **Add to group**, choose a group and
+   confirm administrator access in Telegram. No moderation rights are requested.
 
 A token alone does not enable replies. The screen shows the remaining setup
 step until an owner and destination are saved. The selected model provider or
-subscription must already work in Paseo. For ordinary group mentions, disable
-Group Privacy in BotFather before adding the bot; Inline Mode is not required.
+subscription must already work in Paseo. Group setup checks message access
+automatically and offers **Fix group access** if ordinary mentions are hidden.
+BotFather changes and Inline Mode are not required with administrator access.
 
 ## How replies work
 
@@ -28,8 +30,24 @@ open app is required. Requests reach the chosen Paseo agent's provider; its
 public progress and final answer return to the original Telegram conversation.
 Private reasoning and raw tool output are not forwarded.
 
+Final answers arrive as new replies at the bottom. Once all parts are delivered,
+the task's working status, permission card and service confirmations disappear.
+Questions and people's replies stay in the conversation. Cleanup and confirmed
+delivery boundaries survive plugin reloads; uncertain sends are never repeated.
+
 Telegram requests use the chosen Paseo agent's tools and permissions. This
 connector does not supply a model subscription or grant additional tools.
+
+## Approvals in Telegram
+
+Pending agent permissions appear in one updating English card. The owner and
+separately designated approvers can allow once, remember the provider's exact
+tool grants, deny, or **Grant full access** to that chat while preserving its
+history. Reply commands provide the same controls. The original task keeps
+waiting and returns its final answer after approval in Telegram or Paseo.
+
+Workspace profiles can select **Full access** for newly created agents.
+Permission to ask the bot questions does not grant authority to approve actions.
 
 ## Group access
 

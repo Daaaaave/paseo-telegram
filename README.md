@@ -40,19 +40,32 @@ or subscription in Paseo: this connector uses your Paseo agents to answer.
    **Start**. This pairs the owner; the link expires after 30 minutes.
 4. Choose an existing Paseo chat, or a workspace with a provider/model or optional
    Bots profile. Choose an access policy and select **Save settings**.
-5. Message the bot privately, or add it to a group from the paired account.
+5. Message the bot privately, or select **Add to group** in Paseo or the owner
+   confirmation message. Choose a group and confirm administrator access in
+   Telegram. The invitation requests only `manage_chat`, without moderation rights.
 
 Connecting a token starts setup; it does not enable agent replies on its own.
 **Confirm owner** and **Choose destination** show the remaining steps. The
 connection becomes **Ready** after the owner is paired, a destination is saved
-and the receiver is running. This does not test the model's login or subscription;
+and the receiver is running, with message access verified for admitted groups.
+This does not test the model's login or subscription;
 the selected agent/provider must already work in Paseo. Unsaved destination
 edits do not change where Telegram messages go. `/start` and `/status` explain
 when the current Telegram conversation still needs a saved destination.
 
-For ordinary group mentions, disable **Group Privacy** in BotFather before
-adding the bot. If privacy changed after joining, remove and re-add it. Inline
-Mode is unnecessary. An existing webhook is left intact; disconnect the bot's
+**Group setup** checks Telegram's privacy setting and the bot's membership on
+startup and periodically while the receiver runs. An existing group that hides
+ordinary mentions shows **Group setup needed**, with a **Fix group access** link.
+Choose the affected group and confirm administrator access; BotFather changes
+are unnecessary. **Check group access** refreshes the diagnosis immediately.
+The plugin cannot grant itself administrator rights; Telegram requires a group
+administrator's confirmation. Admission and request policies still apply.
+
+If you prefer a regular member bot, disable **Group Privacy** in BotFather before
+adding it. If privacy changed after joining, remove and re-add the bot; Telegram's
+global privacy flag cannot prove that an existing membership was refreshed.
+With privacy enabled, `/ask@your_bot question` and replies to the bot still work.
+Inline Mode is unnecessary. An existing webhook is left intact; disconnect the bot's
 other integration before enabling polling here. Only one integration should poll
 a Telegram bot at a time.
 
@@ -127,15 +140,55 @@ choice.
 Requests run with the linked agent's ordinary tools, credentials and permissions.
 Separate histories and Git branches do not isolate the host's filesystem or
 credentials. Choose the Paseo permission mode to match the people allowed to
-send requests. The connector does not automatically approve tool or plan
-permissions; those remain in Paseo. Native clarification questions can be
-answered in Telegram by replying with an option number or free text.
+send requests. Native clarification questions can be answered in Telegram by
+replying with an option number or free text.
+
+## Permissions and approvals
+
+For workspace routes, **Permissions** configures newly created agents. Select
+**Full access** (Claude `bypassPermissions`, or the provider's equivalent) if
+these chats should run without routine tool prompts. Existing chats retain their
+own permission mode and history when the profile changes.
+
+When an agent needs approval, the original request stays attached. A single
+English **Approval required** card lists its pending actions and updates as they
+change. The paired owner and users listed in **Approval Telegram user IDs** can:
+
+- **Allow all once**: answer only the requests listed on this card.
+- **Always allow these tools**: use the provider's offered remembered grants for
+  these exact tools, when supported. These grants use local project or session
+  settings, not a plugin-wide auto-approval rule.
+- **Deny all**: reject the listed requests.
+- **Grant full access**: switch this existing chat to its supported full-access
+  mode while preserving history, then release its unambiguous waiting tool calls.
+  Providers can apply mode changes from the next turn; remaining native choices
+  stay on the card. This does not change the bot's profile for future chats.
+- Choose individual native actions when the provider offers multiple choices.
+
+Reply to the exact card with `/approve` (or `/approve_all`), `/always_allow`,
+`/deny`, or `/full_access` to use the same controls without pressing a button.
+Unrelated text such as "allow it" is not interpreted as approval.
+
+Approval authority is separate from permission to ask questions or Telegram
+administrator status. Cards are bound to their bot, chat, topic, message, agent
+and exact native request. Changed, completed and copied cards cannot approve
+other work. Native requests are rechecked before responding. An unconfirmed
+permission RPC is not replayed automatically, including after reload.
+
+Decisions in Paseo also resume the original request. After all required choices
+are resolved, the final answer returns to its original Telegram conversation;
+the model prompt is not sent again. Native questions still require their actual
+answers, even in a full-access chat. All connector-owned messages use English.
 
 ## While an agent works
 
 - One editable message shows elapsed time, public progress and activity.
-- The final answer replaces the progress message; long answers continue in
-  additional messages.
+- The final answer is a new reply to the original request at the bottom of the
+  conversation. Long answers keep their formatting across multiple messages.
+- Once every final part is confirmed delivered, the plugin removes that task's
+  progress, approval card and service confirmations. Questions, people's replies
+  and final answers remain. Message IDs are recorded per task; cleanup never
+  scans or deletes a range of chat history.
 - Bold, italic, code, links, quotes and lists use Telegram's native entities.
   Tables become labeled records that fit narrow screens.
 - Requests are serialized per conversation and shared agent. Different agents
@@ -145,12 +198,17 @@ answered in Telegram by replying with an option number or free text.
 - Replies to questions are matched to the exact chat, topic and original form.
   They reach the native question form immediately, without waiting behind the
   task they are meant to unblock. If that task is still running, the reply gets
-  an acknowledgement and the task's original progress message receives the final
-  answer. Replies to questions from completed tasks wait for their new result.
+  an acknowledgement, removed after the original task's final answer arrives.
+  Replies to questions from completed tasks wait for their new result.
 - Questions already outstanding before a new request are not reposted under it.
   Their original Telegram messages remain replyable; a repeated answer does not
   create another agent prompt.
 - Telegram write pacing and `retry_after` backoff apply across a chat's topics.
+- Confirmed final parts and pending cleanup survive receiver reloads. Uncertain
+  new sends are never automatically repeated, and cleanup waits for a confirmed
+  complete delivery. Failed tasks keep their diagnostic messages. Deletion is
+  best effort: Telegram's 48-hour limit or missing permissions can leave old
+  service messages visible; deletion failures never resend the answer.
 
 Private reasoning and tool arguments/output are excluded from progress updates.
 All connector-generated service messages are English, including setup, progress,

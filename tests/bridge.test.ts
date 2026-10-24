@@ -17,6 +17,7 @@ import { Bridge, findDispatch, messageIdentity } from "../server/bridge.ts";
 import { Router, AgentQueue, routeIdentity } from "../server/routing.ts";
 import { BotsAdapter } from "../server/bots.ts";
 import { Telegram } from "../server/telegram.ts";
+import { formatReply } from "../server/format.ts";
 import { authorized } from "../server/policy.ts";
 import { localTarget } from "../server/daemon.ts";
 
@@ -58,6 +59,8 @@ const message = (chatId = -100, topic = 0, user = 10): TelegramMessage => ({
 });
 class Recorder extends Telegram {
   calls: { method: string; payload: Record<string, unknown> }[] = [];
+  canReadAllGroupMessages = true;
+  membership = { status: "member" };
   administrators: () => Promise<unknown> = async () => [];
   override async call<T>(
     method: string,
@@ -67,8 +70,14 @@ class Recorder extends Telegram {
     this.calls.push({ method, payload });
     if (method === "getChatAdministrators")
       return (await this.administrators()) as T;
-    if (method === "getMe") return { id: 77, username: "demo_help_bot" } as T;
+    if (method === "getMe")
+      return {
+        id: 77, username: "demo_help_bot",
+        can_read_all_group_messages: this.canReadAllGroupMessages,
+      } as T;
+    if (method === "getChatMember") return this.membership as T;
     if (method === "getWebhookInfo") return { url: "" } as T;
+    if (method === "deleteMessages") return true as T;
     if (method === "getUpdates")
       return await new Promise<T>((_resolve, reject) =>
         signal?.addEventListener("abort", () => reject(new Error("stopped")), {
@@ -672,6 +681,16 @@ test("owner pairing explains the next setup step based on the saved destination"
       String(f.telegram.calls.at(-1)?.payload.text),
       target ? /already has a saved Paseo destination/ : /Save settings/,
     );
+    assert.deepEqual(f.telegram.calls.at(-1)?.payload.reply_markup, {
+      inline_keyboard: [
+        [
+          {
+            text: "Add to group",
+            url: "https://t.me/demo_help_bot?startgroup&admin=manage_chat",
+          },
+        ],
+      ],
+    });
     assert.equal(f.sent.length, 0);
   }
 });
@@ -939,6 +958,10 @@ test("a clarification reply unblocks its running task without waiting behind it"
     assert.equal(f.sent.length, 1, "the answer uses the native question RPC, not a second prompt");
     assert.equal(f.store.state.jobs[1].answer, "Here is the example");
     assert.match(f.store.state.jobs[2].answer!, /Answer received/);
+    const deleted = f.telegram.calls.filter(c => c.method === "deleteMessages").flatMap(c => c.payload.message_ids as number[]);
+    assert.ok(deleted.includes(f.store.state.jobs[2].finalReply!.messageIds[0]), "the control acknowledgement belongs to the original task's temporary messages");
+    assert.ok(!deleted.includes(formId), "the meaningful clarification stays in history");
+    assert.ok(!deleted.includes(102), "the person's answer stays in history");
   } finally { await f.bridge.stop(); await running; }
 });
 
@@ -1134,4 +1157,247 @@ test("losing a local creation receipt reuses the native idempotent agent instead
   assert.equal(f.created.length, 1);
   assert.equal(f.sent.length, 2);
   assert.equal(f.sent[1].id, original);
+});
+
+test("a new admitted group receives an English repair link while commands still reach its agent", async () => {
+  const f = await fixture();
+  f.telegram.canReadAllGroupMessages = false;
+  await f.bridge.handle({
+    update_id: 100,
+    my_chat_member: {
+      chat: { id: -300, type: "supergroup", title: "Demo" },
+      from: { id: 10 },
+      date: 100,
+      old_chat_member: { status: "left" },
+      new_chat_member: { status: "member" },
+    },
+  });
+  const notice = f.telegram.calls.at(-1)!;
+  assert.equal(notice.method, "sendMessage");
+  assert.equal(notice.payload.chat_id, -300);
+  assert.match(String(notice.payload.text), /Group setup is incomplete/);
+  assert.match(String(notice.payload.text), /\/ask@demo_help_bot/);
+  assert.doesNotMatch(String(notice.payload.text), /[А-Яа-яЁё]/);
+  assert.deepEqual(notice.payload.reply_markup, {
+    inline_keyboard: [
+      [
+        {
+          text: "Fix group access",
+          url: "https://t.me/demo_help_bot?startgroup&admin=manage_chat",
+        },
+      ],
+    ],
+  });
+  assert.equal(f.sent.length, 0, "joining must not dispatch agent work");
+  await f.bridge.handle({
+    update_id: 101,
+    message: {
+      ...message(-300),
+      text: "/ask@demo_help_bot Check this",
+      entities: [{ type: "bot_command", offset: 0, length: 18 }],
+    },
+  });
+  assert.equal(
+    f.sent.length,
+    1,
+    "privacy warnings must not block delivered commands",
+  );
+  await f.bridge.handle({
+    update_id: 102,
+    message: {
+      ...message(-300),
+      text: "/status@demo_help_bot",
+      entities: [{ type: "bot_command", offset: 0, length: 21 }],
+    },
+  });
+  assert.match(
+    String(f.telegram.calls.at(-1)?.payload.text),
+    /Group setup is incomplete/,
+  );
+  assert.doesNotMatch(String(f.telegram.calls.at(-1)?.payload.text), /^Ready/);
+  f.telegram.membership = { status: "administrator" };
+  await f.bridge.handle({
+    update_id: 103,
+    my_chat_member: {
+      chat: { id: -300, type: "supergroup", title: "Demo" },
+      from: { id: 10 },
+      date: 100,
+      old_chat_member: { status: "member" },
+      new_chat_member: { status: "administrator" },
+    },
+  });
+  assert.match(
+    String(f.telegram.calls.at(-1)?.payload.text),
+    /Group message access is ready/,
+  );
+  assert.equal(f.bridge.groupSetup.access("-300"), "ready");
+});
+
+async function waitingFixture() {
+  const f = await fixture(config({ kind: "agent", agentId: "waiting", sharedHistory: false }));
+  const agent = f.api.agents.ref("waiting");
+  let pending = ["passengers", "statistics"].map((id) => ({
+    id, provider: "claude", kind: "tool", name: `mcp__reports__${id}`, input: { sql: "SELECT 1" },
+  }));
+  let waits = 0;
+  const responses: unknown[] = [];
+  const snapshot = () => ({
+    id: "waiting", provider: "claude", currentModeId: "default",
+    availableModes: [{ id: "bypassPermissions", label: "Bypass" }],
+    status: f.sent.length && pending.length ? "running" : "idle",
+    activeTurn: f.sent.length && pending.length ? { turnId: "turn" } : null,
+    pendingPermissions: f.sent.length ? pending : [],
+  });
+  agent.refresh = async () => ({ agent: snapshot() }) as never;
+  agent.respondToPermission = async (value) => {
+    responses.push(value);
+    pending = pending.filter((request) => request.id !== value.requestId);
+  };
+  f.setWait(async () => {
+    waits++;
+    return { status: pending.length ? "permission" : "idle", final: snapshot(),
+      lastMessage: pending.length ? "Waiting" : "Actual passenger report", error: null };
+  });
+  return { ...f, responses, resolveExternally: () => { pending = []; }, waits: () => waits };
+}
+async function until(check: () => boolean) {
+  for (let n = 0; n < 200 && !check(); n++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(check(), "condition must become true");
+}
+
+test("Telegram approvals release the waiting task without finalizing a notice or sending a second model prompt", async () => {
+  const f = await waitingFixture();
+  const running = f.bridge.handle({ update_id: 1, message: message() });
+  try {
+    await until(() => !!f.store.state.jobs[1]?.approval?.messageId);
+    const job = f.store.state.jobs[1];
+    assert.equal(job.delivery, undefined); assert.equal(job.answer, undefined);
+    assert.ok(job.message, "the original Telegram message must survive while waiting");
+    await f.bridge.handle({ update_id: 2, callback_query: {
+      id: "callback", from: { id: 10 }, data: `pa:${job.approval!.token}:once`,
+      message: { ...message(), message_id: job.approval!.messageId!, from: { id: 77 } },
+    } });
+    await running;
+    assert.equal(f.responses.length, 2); assert.equal(f.sent.length, 1);
+    assert.equal(job.answer, "Actual passenger report"); assert.equal(job.delivery, "done");
+    assert.equal(job.approval!.closed, true);
+    const final = f.telegram.calls.find(call => call.method === "sendMessage" && call.payload.text === "Actual passenger report");
+    assert.ok(final, "the final answer is a new message, not a progress edit");
+    assert.deepEqual(final.payload.reply_parameters, { message_id: message().message_id, allow_sending_without_reply: true });
+    const deleted = f.telegram.calls.filter(call => call.method === "deleteMessages").flatMap(call => call.payload.message_ids as number[]);
+    assert.ok(deleted.includes(job.progress!.messageId!)); assert.ok(deleted.includes(job.approval!.messageId!));
+    assert.ok(job.finalReply!.messageIds.every(id => !deleted.includes(id)));
+  } finally { await f.bridge.stop(); await running; }
+});
+
+test("reload resumes confirmed final chunk boundaries without replaying native work or delivered chunks", async () => {
+  for (const alreadySent of [0, 1, 2]) {
+    const f = await fixture();
+    const answer = "Chunked final. ".repeat(450), chunks = formatReply(answer);
+    assert.equal(chunks.length, 2);
+    f.store.state.jobs[1] = {
+      message: message(), destination: { chatId: -100, topicId: 0 }, answer, delivery: "sending",
+      progress: { startedAt: 0, attempted: true, messageId: 500 }, temporaryMessageIds: [500],
+      finalReply: { mode: "new", messageIds: [501, 502].slice(0, alreadySent), replyToMessageId: message().message_id, sending: false },
+    };
+    f.bridge.start();
+    try {
+      await until(() => f.store.state.jobs[1].delivery === "done" && f.bridge.queued === 0);
+      assert.equal(f.sent.length, 0);
+      const sent = f.telegram.calls.filter(c => c.method === "sendMessage");
+      assert.equal(sent.length, chunks.length - alreadySent);
+      if (sent.length) assert.equal(sent[0].payload.text, chunks[alreadySent].text);
+      assert.deepEqual(f.telegram.calls.filter(c => c.method === "deleteMessages").flatMap(c => c.payload.message_ids as number[]), [500]);
+    } finally { await f.bridge.stop(); }
+  }
+});
+
+test("reload never treats a new unconfirmed final send as an idempotent legacy edit", async () => {
+  const f = await fixture();
+  f.store.state.jobs[1] = {
+    message: message(), destination: { chatId: -100, topicId: 0 }, answer: "Unknown delivery", delivery: "sending",
+    progress: { startedAt: 0, attempted: true, messageId: 500 }, temporaryMessageIds: [500],
+    finalReply: { mode: "new", messageIds: [], replyToMessageId: message().message_id, sending: true },
+  };
+  f.bridge.start();
+  try {
+    await until(() => f.store.state.jobs[1].delivery === "uncertain");
+    assert.equal(f.sent.length, 0);
+    assert.equal(f.telegram.calls.some(c => ["sendMessage", "editMessageText", "deleteMessages"].includes(c.method)), false);
+  } finally { await f.bridge.stop(); }
+});
+
+test("an interrupted legacy final edit remains idempotent and cleanup never deletes that answer", async () => {
+  const f = await fixture();
+  f.store.state.jobs[1] = {
+    message: message(), destination: { chatId: -100, topicId: 0 }, answer: "Recovered old answer", delivery: "sending",
+    progress: { startedAt: 0, attempted: true, messageId: 500 }, temporaryMessageIds: [501],
+  };
+  f.bridge.start();
+  try {
+    await until(() => f.store.state.jobs[1].delivery === "done" && f.bridge.queued === 0);
+    assert.equal(f.sent.length, 0);
+    assert.equal(f.telegram.calls.some(c => c.method === "sendMessage"), false);
+    assert.ok(f.telegram.calls.some(c => c.method === "editMessageText" && c.payload.message_id === 500 && c.payload.text === "Recovered old answer"));
+    assert.deepEqual(f.telegram.calls.filter(c => c.method === "deleteMessages").flatMap(c => c.payload.message_ids as number[]), [501]);
+  } finally { await f.bridge.stop(); }
+});
+
+test("reload recovers a clarification acknowledgement committed before it was linked to the completed source task", async () => {
+  const f = await fixture();
+  f.store.state.jobs[1] = {
+    destination: { chatId: -100, topicId: 0 }, answer: "Actual answer", delivery: "done", temporaryMessageIds: [],
+    finalReply: { mode: "new", messageIds: [500], replyToMessageId: 100 },
+    question: { requestId: "q", fields: [], status: "answered", messageId: 501 },
+  };
+  f.store.state.jobs[2] = {
+    destination: { chatId: -100, topicId: 0 }, answer: "Answer received", delivery: "done", temporaryMessageIds: [],
+    finalReply: { mode: "new", messageIds: [502], replyToMessageId: 101, service: true },
+    questionReply: { sourceJobId: "1", answers: {}, continuesInPlace: true },
+  };
+  f.bridge.start();
+  try {
+    await until(() => f.telegram.calls.some(c => c.method === "deleteMessages"));
+    await f.bridge.messages.settle();
+    assert.deepEqual(f.telegram.calls.filter(c => c.method === "deleteMessages").flatMap(c => c.payload.message_ids as number[]), [502]);
+    assert.equal(f.telegram.calls.some(c => c.method === "sendMessage"), false);
+    assert.equal(f.sent.length, 0);
+    await f.bridge.stop();
+    const saved = new Store(f.root); await saved.load();
+    assert.equal(saved.state.jobs[2].questionReply?.acknowledgementLinked, true, "a completed ownership transfer is durable and does not restart cleanup on every reload");
+  } finally { await f.bridge.stop(); }
+});
+
+test("a reloaded receiver resumes a pending approval and delivers a decision made in Paseo", async () => {
+  const f = await waitingFixture();
+  const running = f.bridge.handle({ update_id: 1, message: message() });
+  await until(() => !!f.store.state.jobs[1]?.approval?.messageId);
+  const originalCard = f.store.state.jobs[1].approval!.messageId;
+  await f.bridge.stop(); await running;
+  const store = new Store(f.root); await store.load();
+  const router = new Router(f.api, new BotsAdapter(async () => assert.fail("not used"), null), store, () => f.connection);
+  const receiver = new Bridge(f.telegram, store, router, () => f.connection, new AgentQueue());
+  const priorWaits = f.waits();
+  receiver.start();
+  try {
+    await until(() => f.waits() > priorWaits);
+    assert.equal(store.state.jobs[1].approval!.messageId, originalCard);
+    f.resolveExternally();
+    await until(() => store.state.jobs[1].delivery === "done");
+    assert.equal(store.state.jobs[1].answer, "Actual passenger report");
+    assert.equal(f.sent.length, 1); assert.equal(f.responses.length, 0);
+    assert.equal(f.telegram.calls.filter((call) => call.method === "sendMessage" && String(call.payload.text).startsWith("Approval required")).length, 1);
+  } finally { await receiver.stop(); }
+});
+
+test("new agent permissions come from the bot profile and later profile edits preserve its existing conversation", async () => {
+  const connection = config();
+  if (connection.target?.kind !== "workspace" || connection.target.profile.kind !== "custom") assert.fail();
+  connection.target.profile.modeId = "bypassPermissions";
+  const f = await fixture(connection);
+  await f.bridge.handle({ update_id: 1, message: message() });
+  assert.equal((f.created[0].config as any).modeId, "bypassPermissions");
+  connection.target.profile.modeId = "default";
+  await f.bridge.handle({ update_id: 2, message: message() });
+  assert.equal(f.created.length, 1); assert.equal(f.sent[0].id, f.sent[1].id);
 });

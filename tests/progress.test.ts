@@ -437,3 +437,8 @@ test("chat-wide write pacing serializes topics and honors Telegram retry_after",
   assert.equal(failures, 1);
   await outbox.run(-123, operation);
 });
+
+test("public text also suppresses quoted JSON credential fields", () => {
+  for (const input of [JSON.stringify({ password: "example" }), JSON.stringify({ api_key: "example" }), JSON.stringify({ nested: { authorization: "example" } }), "-----BEGIN PRIVATE KEY-----"])
+    assert.equal(publicProgress(input), "");
+});

@@ -98,6 +98,7 @@ export async function waitForTask(
   wait = pause,
   onAsyncQuestion?: (question: Question) => Promise<void>,
   priorQuestions: ReadonlySet<string> = new Set(),
+  onPermissions?: (requests: Permission[]) => Promise<void>,
 ): Promise<Result> {
   while (!signal.aborted) {
     const result = await abortable(agent.waitForFinish(60_000), signal);
@@ -109,8 +110,19 @@ export async function waitForTask(
         request.kind !== "question" ||
         request.name !== "request_user_input_async",
     );
-    if (blocking || !permissions.length) return result;
-    if (result.final?.status === "idle" && !result.final.activeTurn)
+    if (!permissions.length) {
+      if (!onPermissions) return result;
+      // Native permission state can arrive one update after the attention event.
+      // An incomplete snapshot is not a final answer or permission to continue.
+      await wait(1000, signal);
+      continue;
+    }
+    if (blocking && !onPermissions) return result;
+    if (
+      !blocking &&
+      result.final?.status === "idle" &&
+      !result.final.activeTurn
+    )
       return { ...result, status: "idle" };
     if (result.final?.status === "error") return { ...result, status: "error" };
     const question = permissions
@@ -118,6 +130,7 @@ export async function waitForTask(
       .map(questionFrom)
       .find((value) => value !== undefined);
     if (question && onAsyncQuestion) await onAsyncQuestion(question);
+    if (onPermissions) await onPermissions(permissions);
     // Repeated waits otherwise resolve immediately to the same outstanding form.
     await wait(1000, signal);
   }

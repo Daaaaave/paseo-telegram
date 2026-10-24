@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   addRpc,
   choicesRpc,
+  checkGroupsRpc,
   disconnectRpc,
   listRpc,
   pairRpc,
@@ -19,6 +20,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(addRpc, (input) => manager.add(input));
   server.handle(saveRpc, (input) => manager.save(input));
   server.handle(pairRpc, ({ id }) => manager.pair(id));
+  server.handle(checkGroupsRpc, ({ id }) => manager.checkGroups(id));
   server.handle(disconnectRpc, ({ id }) => manager.disconnect(id));
   server.handle(revokeRpc, ({ id, chatId }) => manager.revoke(id, chatId));
   server.handle(reviewRpc, ({ id, chatId, approve }) =>

@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.3.1
+
+- Send final answers as new replies at the bottom of the Telegram conversation.
+  Remove task-owned progress, permission cards and service confirmations after
+  every final part is confirmed delivered; retain questions and people's replies.
+- Persist per-part final receipts and cleanup retries. Resume confirmed delivery
+  boundaries after reload without repeating uncertain sends, preserve older
+  in-place final answers, and handle late clarification acknowledgements.
+- Keep diagnostic messages for failed or uncertain tasks. Deletion failures never
+  fail or resend a confirmed final answer.
+
+## 0.3.0
+
+- Approve native agent permissions directly in Telegram with one updating card:
+  allow once, remember exact tool grants, deny, individual native choices, and
+  **Grant full access** for the same chat without losing its history.
+- Add separate approval user IDs and reply commands. Bind cards to their exact
+  Telegram context, agent and native requests; reject stale/cross-context actions
+  and preserve native response receipts across reloads.
+- Keep tasks waiting through permission prompts and resume their final reply
+  after approval in either Telegram or Paseo, without resending their prompt.
+- Clarify permission defaults for new chats and redact JSON credentials and
+  private-key headers from public previews.
+
+## 0.2.4
+
+- Add an **Add to group** link to settings and owner confirmation, requesting
+  administrator message access without moderation rights.
+- Check Telegram privacy and group membership automatically. Show **Group setup
+  needed** and **Fix group access** when ordinary mentions cannot reach the bot,
+  with an immediate manual recheck and `/ask@bot` guidance.
+- Keep setup notifications in English and preserve admission, request policies,
+  existing conversations and credentials during upgrades.
+- Update Zod to 4.6.7 to address its collection-validation memory exhaustion advisory.
+
 ## 0.2.3
 
 - Deliver native clarification answers without waiting behind the foreground

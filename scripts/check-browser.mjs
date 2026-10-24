@@ -105,9 +105,25 @@ try {
   };
   const wait = () => new Promise((r) => setTimeout(r, 150));
   const text = () => evaluate(`document.body.textContent`);
+  let navigation = 0;
+  const waitFor = async (expression, description) => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (await evaluate(expression)) return;
+      if (errors.length) throw Error(errors.join("\n"));
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw Error(`Timed out waiting for ${description}: ${await text()}`);
+  };
   const navigate = async (query = "") => {
-    await send("Page.navigate", { url: url + query });
-    await new Promise((r) => setTimeout(r, 400));
+    const target = new URL(url + query);
+    target.searchParams.set("_check", String(++navigation));
+    const destination = target.href;
+    await send("Page.navigate", { url: destination });
+    await waitFor(
+      `location.href===${JSON.stringify(destination)} && (!!document.querySelector('[aria-label="Save settings"]') || document.body.textContent.includes('Bring a conversation into Paseo'))`,
+      "the Telegram settings screen",
+    );
   };
   const select = async (label, value) => {
     await evaluate(
@@ -121,6 +137,12 @@ try {
     );
     await wait();
   };
+  const fill = async (label, value) => {
+    await evaluate(
+      `(()=>{const e=document.querySelector('input[aria-label=${JSON.stringify(label)}]');if(!e)throw Error('Missing input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`,
+    );
+    await wait();
+  };
   await send("Runtime.enable");
   await send("Emulation.setDeviceMetricsOverride", {
     width: 1200,
@@ -129,8 +151,7 @@ try {
     mobile: false,
   });
   const url = pathToFileURL(resolve(".context/preview.html")).href;
-  await send("Page.navigate", { url });
-  await new Promise((r) => setTimeout(r, 500));
+  await navigate();
   assert.equal(
     await evaluate(
       `!!document.querySelector('select[aria-label="Paseo chat"]')`,
@@ -167,6 +188,40 @@ try {
   );
   await select("Send Telegram messages to", "workspace");
   await select("Workspace", "backend");
+  await select("Provider", "example");
+  await select("Model", "model");
+  await select("Permissions", "bypassPermissions");
+  assert.match(await text(), /Full access skips tool approval prompts/);
+  await click("Save settings");
+  assert.equal(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.save').at(-1).input.target.profile.modeId`,
+    ),
+    "bypassPermissions",
+  );
+  await fill("Approval Telegram user IDs", "20, 30");
+  await click("Save settings");
+  assert.deepEqual(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.save').at(-1).input.policy.approvers`,
+    ),
+    [20, 30],
+  );
+  await fill("Approval Telegram user IDs", "invalid");
+  assert.match(await text(), /Enter up to 100 positive Telegram user IDs/);
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[aria-label="Save settings"]').getAttribute('aria-disabled')`,
+    ),
+    "true",
+  );
+  await click("Discard edits");
+  assert.equal(
+    await evaluate(
+      `document.querySelector('input[aria-label="Approval Telegram user IDs"]').value`,
+    ),
+    "20, 30",
+  );
   await select("Settings for new agents", "bots");
   await select("Bots profile", "support");
   await click("Save settings");
@@ -339,6 +394,42 @@ try {
     /only for conversations with their own saved destination/,
   );
 
+  // Telegram's default privacy must never produce a green connection status.
+  await navigate("?privacy=1");
+  assert.match(await text(), /Group setup needed/);
+  assert.match(await text(), /Telegram is hiding ordinary @mentions/);
+  assert.match(await text(), /\/ask@example_help_bot/);
+  assert.equal(
+    await evaluate(
+      `document.querySelector('a[href="https://t.me/example_help_bot?startgroup&admin=manage_chat"]').textContent`,
+    ),
+    "Add to group",
+  );
+  assert.equal(
+    await evaluate(`document.documentElement.scrollWidth<=innerWidth`),
+    true,
+  );
+  await evaluate(
+    `document.querySelector('[aria-label="Check group access"]').scrollIntoView({block:'center'})`,
+  );
+  shot = await send("Page.captureScreenshot", { format: "png" });
+  await writeFile(
+    ".context/ui-check/group-setup-mobile.png",
+    Buffer.from(shot.data, "base64"),
+  );
+  await click("Check group access");
+  assert.equal(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.check-groups').length`,
+    ),
+    1,
+  );
+  assert.match(await text(), /Group message access is ready/);
+  assert.doesNotMatch(await text(), /Group setup needed/);
+  await navigate("?unverified=1");
+  assert.match(await text(), /Group message access has not been verified/);
+  assert.doesNotMatch(await text(), /Group message access is ready/);
+
   // Workspace onboarding explains the prerequisite and cannot save a missing model.
   await navigate("?setup=1&no-providers=1");
   await select("Send Telegram messages to", "workspace");
@@ -354,8 +445,7 @@ try {
     await evaluate(`document.documentElement.scrollWidth<=innerWidth`),
     true,
   );
-  await send("Page.navigate", { url: url + "?empty=1" });
-  await new Promise((r) => setTimeout(r, 350));
+  await navigate("?empty=1");
   assert.equal(
     await evaluate(
       `document.body.textContent.includes('Bring a conversation into Paseo')`,

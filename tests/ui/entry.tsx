@@ -27,6 +27,7 @@ const connection = {
       directMessages: "owner",
       groupUsers: "operators",
       operators: [],
+      approvers: [],
       invocation: "mentions",
     },
     bindings: {},
@@ -36,7 +37,8 @@ const connection = {
   running: true,
   lastError: null,
   queued: 0,
-  groups: [{ id: "-100", title: "Customer community" }],
+  groupPrivacy: "enabled",
+  groups: [{ id: "-100", title: "Customer community", access: "ready" }],
   pendingGroups: [] as { id: string; title: string }[],
   conversations: [
     {
@@ -54,6 +56,8 @@ if (params.has("pending")) {
 }
 if (params.has("setup")) (connection.config as any).target = null;
 if (params.has("unpaired")) (connection as any).ownerId = null;
+if (params.has("privacy")) connection.groups[0].access = "needs_admin";
+if (params.has("unverified")) connection.groups[0].access = "checking";
 if (params.has("setup") || params.has("unpaired")) {
   connection.groups = [];
   connection.conversations = [];
@@ -89,7 +93,7 @@ const choices = {
       models: [{ id: "model", label: "Example model", thinking: [] }],
       modes: [
         { id: "review", label: "Ask for approval" },
-        { id: "full", label: "Full access" },
+        { id: "bypassPermissions", label: "Bypass" },
       ],
     },
   ],
@@ -127,11 +131,17 @@ const client = {
     if (contract.name === "telegram.review") {
       const group = connection.pendingGroups.find((g) => g.id === input.chatId);
       if (!group) throw new Error("No pending group");
-      if (input.approve) connection.groups.push(group);
+      if (input.approve) connection.groups.push({ ...group, access: "ready" });
       connection.pendingGroups = connection.pendingGroups.filter(
         (g) => g.id !== input.chatId,
       );
       return { approved: input.approve };
+    }
+    if (contract.name === "telegram.check-groups") {
+      connection.groups.forEach((group) => {
+        group.access = "ready";
+      });
+      return {};
     }
     return {};
   },
