@@ -18,6 +18,7 @@ import type {
 import {
   addRpc,
   choicesRpc,
+  checkGroupsRpc,
   disconnectRpc,
   listRpc,
   pairRpc,
@@ -34,6 +35,7 @@ import {
 } from "../shared/config.ts";
 import { Button, Field, Notice, errorText } from "./controls.tsx";
 import { RouteEditor } from "./route-editor.tsx";
+import { groupAccessText, groupInviteUrl } from "../shared/group-setup.ts";
 
 const EMPTY_CHOICES: Choices = {
   agents: [],
@@ -61,6 +63,15 @@ function connectionStatus(connection: ConnectionView): {
     return { label: "Choose destination", color: "statusWarning" };
   if (!connection.running)
     return { label: "Connecting…", color: "foregroundMuted" };
+  if (
+    connection.groups.some(
+      (group) =>
+        group.access === "needs_admin" || group.access === "not_member",
+    )
+  )
+    return { label: "Group setup needed", color: "statusWarning" };
+  if (connection.groups.some((group) => group.access !== "ready"))
+    return { label: "Check group access", color: "statusWarning" };
   return {
     label: connection.config.target ? "Ready" : "Ready for selected chats",
     color: "statusSuccess",
@@ -678,6 +689,100 @@ function ConnectionEditor({
           </View>
         </SettingsSection>
       )}
+      {connection.ownerId !== null && (
+        <SettingsSection title="Group setup">
+          <View style={{ gap: 16 }}>
+            <Text
+              style={{
+                color: theme.colors.foregroundMuted,
+                fontSize: 13,
+                lineHeight: 21,
+              }}
+            >
+              Choose a group and confirm administrator access in Telegram. The
+              invitation requests message access without moderation permissions.
+              Telegram delivers group messages to the bot; the saved request
+              policy decides which ones reach an agent.
+            </Text>
+            <ExternalLink href={groupInviteUrl(connection.config.username)}>
+              Add to group
+            </ExternalLink>
+            <Button
+              theme={theme}
+              title="Check group access"
+              secondary
+              disabled={
+                busy || !connection.config.enabled || !connection.running
+              }
+              onPress={() =>
+                void action(async () => {
+                  await client.rpc(checkGroupsRpc, { id: draft.id });
+                  await refresh();
+                })
+              }
+            />
+            {connection.groups.map((group) => (
+              <View key={group.id} style={{ gap: 10 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.colors.foreground,
+                      fontSize: 14,
+                      flex: 1,
+                    }}
+                  >
+                    {group.title}
+                  </Text>
+                  <Button
+                    theme={theme}
+                    title="Revoke"
+                    secondary
+                    disabled={busy}
+                    label={`Revoke ${group.title}`}
+                    onPress={() =>
+                      void action(async () => {
+                        await client.rpc(revokeRpc, {
+                          id: draft.id,
+                          chatId: group.id,
+                        });
+                        await refresh();
+                      })
+                    }
+                  />
+                </View>
+                <Text
+                  style={{
+                    color:
+                      group.access === "ready"
+                        ? theme.colors.statusSuccess
+                        : theme.colors.statusWarning,
+                    fontSize: 13,
+                    lineHeight: 21,
+                  }}
+                >
+                  {groupAccessText(
+                    connection.config.username,
+                    group.access ?? "checking",
+                  )}
+                </Text>
+                {group.access !== "ready" && (
+                  <ExternalLink
+                    href={groupInviteUrl(connection.config.username)}
+                  >
+                    Fix group access
+                  </ExternalLink>
+                )}
+              </View>
+            ))}
+          </View>
+        </SettingsSection>
+      )}
       {connection.config.policy.groupAdmission === "approval" &&
         connection.pendingGroups.length > 0 && (
           <SettingsSection title="Groups awaiting approval">
@@ -974,48 +1079,6 @@ function ConnectionEditor({
                     }
                   />
                 )}
-              </View>
-            ))}
-          </View>
-        </SettingsSection>
-      )}
-      {connection.groups.length > 0 && (
-        <SettingsSection title="Admitted groups">
-          <View style={{ gap: 12 }}>
-            {connection.groups.map((group) => (
-              <View
-                key={group.id}
-                style={{
-                  flexDirection: "row",
-                  gap: 12,
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
-                <Text
-                  style={{
-                    color: theme.colors.foreground,
-                    fontSize: 13,
-                    flex: 1,
-                  }}
-                >
-                  {group.title}
-                </Text>
-                <Button
-                  theme={theme}
-                  title="Revoke"
-                  secondary
-                  disabled={busy}
-                  onPress={() =>
-                    void action(async () => {
-                      await client.rpc(revokeRpc, {
-                        id: draft.id,
-                        chatId: group.id,
-                      });
-                      await refresh();
-                    })
-                  }
-                />
               </View>
             ))}
           </View>

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.4
+
+- Add an **Add to group** link to settings and owner confirmation, requesting
+  administrator message access without moderation rights.
+- Check Telegram privacy and group membership automatically. Show **Group setup
+  needed** and **Fix group access** when ordinary mentions cannot reach the bot,
+  with an immediate manual recheck and `/ask@bot` guidance.
+- Keep setup notifications in English and preserve admission, request policies,
+  existing conversations and credentials during upgrades.
+- Update Zod to 4.6.7 to address its collection-validation memory exhaustion advisory.
+
 ## 0.2.3
 
 - Deliver native clarification answers without waiting behind the foreground

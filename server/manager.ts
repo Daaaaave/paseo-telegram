@@ -183,8 +183,13 @@ export class Manager {
         running: bridge?.running ?? false,
         lastError: this.errors.get(config.id) ?? bridge?.lastError ?? null,
         queued: bridge?.queued ?? 0,
+        groupPrivacy: bridge?.groupSetup.privacy ?? "unknown",
         groups: Object.entries(store?.state.groups ?? {}).map(
-          ([id, group]) => ({ id, title: group.title }),
+          ([id, group]) => ({
+            id,
+            title: group.title,
+            access: bridge?.groupSetup.access(id) ?? "checking",
+          }),
         ),
         pendingGroups: Object.entries(store?.state.pendingGroups ?? {}).map(
           ([id, group]) => ({ id, title: group.title }),
@@ -317,6 +322,17 @@ export class Manager {
         expiresAt,
       };
     });
+  }
+  async checkGroups(id: string): Promise<Record<string, never>> {
+    await this.loading;
+    this.registry.get(id);
+    const bridge = this.bridges.get(id);
+    if (!bridge?.running)
+      throw new Error(
+        "Enable the Telegram receiver before checking group access.",
+      );
+    await bridge.groupSetup.refresh(true);
+    return {};
   }
   disconnect(id: string): Promise<{ removed: boolean }> {
     return this.exclusive(async () => {

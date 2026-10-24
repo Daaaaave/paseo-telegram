@@ -33,6 +33,10 @@ routes without deleting earlier agents.
 - `Registry` validates configuration, serializes writes and checks revisions.
   It stores tokens separately and never returns them through list/settings RPCs.
 - Each `Bridge` owns a bot's polling, admission, jobs, progress and deliveries.
+- `GroupSetup` reads `getMe` and `getChatMember` on startup, about once a minute
+  during polling, and on explicit checks or membership changes. Unverified or
+  failed checks never claim group readiness. Membership updates take precedence
+  over older requests. Health is transient; saved admission and routing are unchanged.
 - `Router` selects the agent/workspace and configures new agents. Existing agent
   configuration is never overwritten.
 - `AgentQueue` serializes conversation work and shared-agent access across bots.
@@ -64,6 +68,16 @@ Connector-owned service strings use English only. User input, public agent
 commentary, native question content and final answers are transported without
 changing their language. Credential redaction still recognizes sensitive text
 in supported non-English input.
+
+Group invitation links request only `manage_chat`; Telegram's own confirmation
+grants administrator status. The plugin never promotes itself or changes
+BotFather privacy settings. Admin membership bypasses privacy mode; ordinary
+membership requires disabled privacy. A regular member with default privacy
+gets an actionable warning and can still use addressed commands or replies.
+Admission checks run independently of message access: pending or rejected groups
+receive no setup invitation or agent access. Setup notices accompany new
+admissions and membership changes, never a blanket startup broadcast. Failed
+notice delivery does not stop polling; the diagnosis remains in Paseo.
 
 ## Persistence and recovery
 

@@ -24,6 +24,8 @@ import {
 import { AgentQueue, Router } from "./routing.ts";
 import { syncIncompleteReply, syncIsComplete } from "./sync.ts";
 import { refreshLinkedAgent } from "./agents.ts";
+import { GroupSetup } from "./group-setup.ts";
+import { groupAccessText, groupInviteUrl } from "../shared/group-setup.ts";
 
 const FALLBACK =
   "The task needs attention in Paseo. Check its chat before sending the request again.";
@@ -49,6 +51,7 @@ export class Bridge {
   readonly telegram: Telegram;
   readonly store: Store;
   readonly router: Router;
+  readonly groupSetup: GroupSetup;
   private readonly connection: () => Connection;
   private readonly queue: AgentQueue;
   constructor(
@@ -63,6 +66,7 @@ export class Bridge {
     this.router = router;
     this.connection = connection;
     this.queue = queue;
+    this.groupSetup = new GroupSetup(telegram, store, connection, this.signal);
   }
   get queued() {
     return this.tasks.size;
@@ -182,6 +186,7 @@ export class Bridge {
     while (!this.signal.aborted) {
       try {
         await this.reconcilePendingGroups();
+        await this.groupSetup.refresh();
         const updates = await this.telegram.call<TelegramUpdate[]>(
           "getUpdates",
           {
@@ -237,6 +242,7 @@ export class Bridge {
   private async reconcilePendingGroups(): Promise<void> {
     if (this.store.state.ownerId === null) return;
     for (const id of Object.keys(this.store.state.pendingGroups)) {
+      let admitted = false;
       await this.store.withGroups(async () => {
         const state = this.store.state,
           group = state.pendingGroups[id];
@@ -247,8 +253,10 @@ export class Bridge {
           group.addedBy,
         );
         if (decision === "pending") return;
-        if (decision === "admit") state.groups[id] = group;
-        else {
+        if (decision === "admit") {
+          state.groups[id] = group;
+          admitted = true;
+        } else {
           delete state.groups[id];
           await this.store.save();
           try {
@@ -268,6 +276,49 @@ export class Bridge {
         delete state.pendingGroups[id];
         await this.store.save();
       });
+      if (admitted) await this.notifyGroupSetup(id);
+    }
+  }
+  private groupButton(text = "Add to group") {
+    return {
+      inline_keyboard: [
+        [
+          {
+            text,
+            url: groupInviteUrl(this.connection().username),
+          },
+        ],
+      ],
+    };
+  }
+  private async notifyGroupSetup(id: string): Promise<void> {
+    if (!this.store.state.groups[id]) return;
+    await this.groupSetup.refresh(true);
+    if (!this.store.state.groups[id] || !this.connection().enabled || this.signal.aborted) return;
+    const config = this.connection(),
+      access = this.groupSetup.access(id);
+    try {
+      await this.telegram.call(
+        "sendMessage",
+        {
+          chat_id: Number(id),
+          text:
+            access === "ready"
+              ? `Group message access is ready. ${
+                  config.policy.invocation === "all"
+                    ? "Authorized messages can now reach Paseo."
+                    : `Mention @${config.username}, use /ask@${config.username} followed by your question, or reply to one of the bot's messages.`
+                } Requests follow the destinations and permissions saved in Paseo.`
+              : groupAccessText(config.username, access),
+          ...(access !== "ready"
+            ? { reply_markup: this.groupButton("Fix group access") }
+            : {}),
+        },
+        this.signal,
+      );
+    } catch {
+      // A setup notice is optional; inability to send must not stop reception.
+      // The same access diagnosis remains available in the Paseo settings.
     }
   }
   async handle(update: TelegramUpdate, background = false): Promise<void> {
@@ -276,8 +327,9 @@ export class Bridge {
     const state = this.store.state;
     const membership = update.my_chat_member;
     if (membership && isGroup(membership.chat)) {
+      const key = String(membership.chat.id);
+      this.groupSetup.observe(key, membership.new_chat_member);
       await this.store.withGroups(async () => {
-        const key = String(membership.chat.id);
         if (!isMember(membership.new_chat_member)) {
           delete state.groups[key];
           delete state.pendingGroups[key];
@@ -304,6 +356,11 @@ export class Bridge {
         await this.store.save();
       });
       await this.reconcilePendingGroups();
+      if (
+        state.groups[key] &&
+        membership.old_chat_member.status !== membership.new_chat_member.status
+      )
+        await this.notifyGroupSetup(key);
       return;
     }
     const message = update.message;
@@ -331,6 +388,7 @@ export class Bridge {
           text: this.router.target(message)
             ? "Owner confirmed. This conversation already has a saved Paseo destination — send a message to the agent. Replies use your Paseo provider or subscription. Group admission follows the policy saved in Paseo."
             : "Owner confirmed. Agent replies need a saved chat or workspace. Return to Paseo → Telegram, choose a destination and select Save settings. Replies use your Paseo provider or subscription. Group admission follows the policy saved in Paseo.",
+          reply_markup: this.groupButton(),
         },
         this.signal,
       );
@@ -396,13 +454,27 @@ export class Bridge {
     }
     if (!(await this.authorized(message))) return;
     if (addressedSetup) {
+      if (isGroup(message.chat)) await this.groupSetup.refresh(true);
+      const access = isGroup(message.chat)
+        ? this.groupSetup.access(String(message.chat.id))
+        : "ready";
       await this.telegram.call(
         "sendMessage",
         {
           chat_id: message.chat.id,
-          text: this.router.target(message)
-            ? "Ready: this conversation has a saved Paseo destination. Send a message to the agent. In groups, mention this bot or reply to one of its messages. The model provider must work in Paseo."
-            : "Setup incomplete. This conversation has no Paseo destination. Open Paseo → Telegram, choose a chat or workspace and select Save settings. The bot cannot request agent replies until a destination is saved.",
+          text:
+            access !== "ready"
+              ? groupAccessText(config.username, access)
+              : this.router.target(message)
+                ? "Ready: this conversation has a saved Paseo destination. Send a message to the agent. In groups, mention this bot or reply to one of its messages. The model provider must work in Paseo."
+                : "Setup incomplete. This conversation has no Paseo destination. Open Paseo → Telegram, choose a chat or workspace and select Save settings. The bot cannot request agent replies until a destination is saved.",
+          ...(access !== "ready" || message.chat.type === "private"
+            ? {
+                reply_markup: this.groupButton(
+                  access !== "ready" ? "Fix group access" : "Add to group",
+                ),
+              }
+            : {}),
           ...(message.message_thread_id
             ? { message_thread_id: message.message_thread_id }
             : {}),

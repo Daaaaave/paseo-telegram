@@ -23,7 +23,16 @@ export const connectionViewSchema = z.object({
   running: z.boolean(),
   lastError: z.string().nullable(),
   queued: z.number(),
-  groups: z.array(z.object({ id: z.string(), title: z.string() })),
+  groupPrivacy: z.enum(["enabled", "disabled", "unknown"]).default("unknown"),
+  groups: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      access: z
+        .enum(["ready", "needs_admin", "not_member", "checking"])
+        .default("checking"),
+    }),
+  ),
   pendingGroups: z
     .array(z.object({ id: z.string(), title: z.string() }))
     .default([]),
@@ -81,6 +90,11 @@ export const pairRpc = defineRpc({
   name: "telegram.pair",
   input: connectionId,
   output: z.object({ url: z.string(), expiresAt: z.number() }),
+});
+export const checkGroupsRpc = defineRpc({
+  name: "telegram.check-groups",
+  input: connectionId,
+  output: empty,
 });
 export const disconnectRpc = defineRpc({
   name: "telegram.disconnect",

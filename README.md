@@ -40,19 +40,32 @@ or subscription in Paseo: this connector uses your Paseo agents to answer.
    **Start**. This pairs the owner; the link expires after 30 minutes.
 4. Choose an existing Paseo chat, or a workspace with a provider/model or optional
    Bots profile. Choose an access policy and select **Save settings**.
-5. Message the bot privately, or add it to a group from the paired account.
+5. Message the bot privately, or select **Add to group** in Paseo or the owner
+   confirmation message. Choose a group and confirm administrator access in
+   Telegram. The invitation requests only `manage_chat`, without moderation rights.
 
 Connecting a token starts setup; it does not enable agent replies on its own.
 **Confirm owner** and **Choose destination** show the remaining steps. The
 connection becomes **Ready** after the owner is paired, a destination is saved
-and the receiver is running. This does not test the model's login or subscription;
+and the receiver is running, with message access verified for admitted groups.
+This does not test the model's login or subscription;
 the selected agent/provider must already work in Paseo. Unsaved destination
 edits do not change where Telegram messages go. `/start` and `/status` explain
 when the current Telegram conversation still needs a saved destination.
 
-For ordinary group mentions, disable **Group Privacy** in BotFather before
-adding the bot. If privacy changed after joining, remove and re-add it. Inline
-Mode is unnecessary. An existing webhook is left intact; disconnect the bot's
+**Group setup** checks Telegram's privacy setting and the bot's membership on
+startup and periodically while the receiver runs. An existing group that hides
+ordinary mentions shows **Group setup needed**, with a **Fix group access** link.
+Choose the affected group and confirm administrator access; BotFather changes
+are unnecessary. **Check group access** refreshes the diagnosis immediately.
+The plugin cannot grant itself administrator rights; Telegram requires a group
+administrator's confirmation. Admission and request policies still apply.
+
+If you prefer a regular member bot, disable **Group Privacy** in BotFather before
+adding it. If privacy changed after joining, remove and re-add the bot; Telegram's
+global privacy flag cannot prove that an existing membership was refreshed.
+With privacy enabled, `/ask@your_bot question` and replies to the bot still work.
+Inline Mode is unnecessary. An existing webhook is left intact; disconnect the bot's
 other integration before enabling polling here. Only one integration should poll
 a Telegram bot at a time.
 

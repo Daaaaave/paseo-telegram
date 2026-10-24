@@ -339,6 +339,42 @@ try {
     /only for conversations with their own saved destination/,
   );
 
+  // Telegram's default privacy must never produce a green connection status.
+  await navigate("?privacy=1");
+  assert.match(await text(), /Group setup needed/);
+  assert.match(await text(), /Telegram is hiding ordinary @mentions/);
+  assert.match(await text(), /\/ask@example_help_bot/);
+  assert.equal(
+    await evaluate(
+      `document.querySelector('a[href="https://t.me/example_help_bot?startgroup&admin=manage_chat"]').textContent`,
+    ),
+    "Add to group",
+  );
+  assert.equal(
+    await evaluate(`document.documentElement.scrollWidth<=innerWidth`),
+    true,
+  );
+  await evaluate(
+    `document.querySelector('[aria-label="Check group access"]').scrollIntoView({block:'center'})`,
+  );
+  shot = await send("Page.captureScreenshot", { format: "png" });
+  await writeFile(
+    ".context/ui-check/group-setup-mobile.png",
+    Buffer.from(shot.data, "base64"),
+  );
+  await click("Check group access");
+  assert.equal(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.check-groups').length`,
+    ),
+    1,
+  );
+  assert.match(await text(), /Group message access is ready/);
+  assert.doesNotMatch(await text(), /Group setup needed/);
+  await navigate("?unverified=1");
+  assert.match(await text(), /Group message access has not been verified/);
+  assert.doesNotMatch(await text(), /Group message access is ready/);
+
   // Workspace onboarding explains the prerequisite and cannot save a missing model.
   await navigate("?setup=1&no-providers=1");
   await select("Send Telegram messages to", "workspace");

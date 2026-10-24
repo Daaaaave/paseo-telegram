@@ -58,6 +58,8 @@ const message = (chatId = -100, topic = 0, user = 10): TelegramMessage => ({
 });
 class Recorder extends Telegram {
   calls: { method: string; payload: Record<string, unknown> }[] = [];
+  canReadAllGroupMessages = true;
+  membership = { status: "member" };
   administrators: () => Promise<unknown> = async () => [];
   override async call<T>(
     method: string,
@@ -67,7 +69,12 @@ class Recorder extends Telegram {
     this.calls.push({ method, payload });
     if (method === "getChatAdministrators")
       return (await this.administrators()) as T;
-    if (method === "getMe") return { id: 77, username: "demo_help_bot" } as T;
+    if (method === "getMe")
+      return {
+        id: 77, username: "demo_help_bot",
+        can_read_all_group_messages: this.canReadAllGroupMessages,
+      } as T;
+    if (method === "getChatMember") return this.membership as T;
     if (method === "getWebhookInfo") return { url: "" } as T;
     if (method === "getUpdates")
       return await new Promise<T>((_resolve, reject) =>
@@ -672,6 +679,16 @@ test("owner pairing explains the next setup step based on the saved destination"
       String(f.telegram.calls.at(-1)?.payload.text),
       target ? /already has a saved Paseo destination/ : /Save settings/,
     );
+    assert.deepEqual(f.telegram.calls.at(-1)?.payload.reply_markup, {
+      inline_keyboard: [
+        [
+          {
+            text: "Add to group",
+            url: "https://t.me/demo_help_bot?startgroup&admin=manage_chat",
+          },
+        ],
+      ],
+    });
     assert.equal(f.sent.length, 0);
   }
 });
@@ -1134,4 +1151,78 @@ test("losing a local creation receipt reuses the native idempotent agent instead
   assert.equal(f.created.length, 1);
   assert.equal(f.sent.length, 2);
   assert.equal(f.sent[1].id, original);
+});
+
+test("a new admitted group receives an English repair link while commands still reach its agent", async () => {
+  const f = await fixture();
+  f.telegram.canReadAllGroupMessages = false;
+  await f.bridge.handle({
+    update_id: 100,
+    my_chat_member: {
+      chat: { id: -300, type: "supergroup", title: "Demo" },
+      from: { id: 10 },
+      date: 100,
+      old_chat_member: { status: "left" },
+      new_chat_member: { status: "member" },
+    },
+  });
+  const notice = f.telegram.calls.at(-1)!;
+  assert.equal(notice.method, "sendMessage");
+  assert.equal(notice.payload.chat_id, -300);
+  assert.match(String(notice.payload.text), /Group setup is incomplete/);
+  assert.match(String(notice.payload.text), /\/ask@demo_help_bot/);
+  assert.doesNotMatch(String(notice.payload.text), /[А-Яа-яЁё]/);
+  assert.deepEqual(notice.payload.reply_markup, {
+    inline_keyboard: [
+      [
+        {
+          text: "Fix group access",
+          url: "https://t.me/demo_help_bot?startgroup&admin=manage_chat",
+        },
+      ],
+    ],
+  });
+  assert.equal(f.sent.length, 0, "joining must not dispatch agent work");
+  await f.bridge.handle({
+    update_id: 101,
+    message: {
+      ...message(-300),
+      text: "/ask@demo_help_bot Check this",
+      entities: [{ type: "bot_command", offset: 0, length: 18 }],
+    },
+  });
+  assert.equal(
+    f.sent.length,
+    1,
+    "privacy warnings must not block delivered commands",
+  );
+  await f.bridge.handle({
+    update_id: 102,
+    message: {
+      ...message(-300),
+      text: "/status@demo_help_bot",
+      entities: [{ type: "bot_command", offset: 0, length: 21 }],
+    },
+  });
+  assert.match(
+    String(f.telegram.calls.at(-1)?.payload.text),
+    /Group setup is incomplete/,
+  );
+  assert.doesNotMatch(String(f.telegram.calls.at(-1)?.payload.text), /^Ready/);
+  f.telegram.membership = { status: "administrator" };
+  await f.bridge.handle({
+    update_id: 103,
+    my_chat_member: {
+      chat: { id: -300, type: "supergroup", title: "Demo" },
+      from: { id: 10 },
+      date: 100,
+      old_chat_member: { status: "member" },
+      new_chat_member: { status: "administrator" },
+    },
+  });
+  assert.match(
+    String(f.telegram.calls.at(-1)?.payload.text),
+    /Group message access is ready/,
+  );
+  assert.equal(f.bridge.groupSetup.access("-300"), "ready");
 });
