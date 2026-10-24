@@ -105,9 +105,25 @@ try {
   };
   const wait = () => new Promise((r) => setTimeout(r, 150));
   const text = () => evaluate(`document.body.textContent`);
+  let navigation = 0;
+  const waitFor = async (expression, description) => {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      if (await evaluate(expression)) return;
+      if (errors.length) throw Error(errors.join("\n"));
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw Error(`Timed out waiting for ${description}: ${await text()}`);
+  };
   const navigate = async (query = "") => {
-    await send("Page.navigate", { url: url + query });
-    await new Promise((r) => setTimeout(r, 400));
+    const target = new URL(url + query);
+    target.searchParams.set("_check", String(++navigation));
+    const destination = target.href;
+    await send("Page.navigate", { url: destination });
+    await waitFor(
+      `location.href===${JSON.stringify(destination)} && (!!document.querySelector('[aria-label="Save settings"]') || document.body.textContent.includes('Bring a conversation into Paseo'))`,
+      "the Telegram settings screen",
+    );
   };
   const select = async (label, value) => {
     await evaluate(
@@ -135,8 +151,7 @@ try {
     mobile: false,
   });
   const url = pathToFileURL(resolve(".context/preview.html")).href;
-  await send("Page.navigate", { url });
-  await new Promise((r) => setTimeout(r, 500));
+  await navigate();
   assert.equal(
     await evaluate(
       `!!document.querySelector('select[aria-label="Paseo chat"]')`,
@@ -430,8 +445,7 @@ try {
     await evaluate(`document.documentElement.scrollWidth<=innerWidth`),
     true,
   );
-  await send("Page.navigate", { url: url + "?empty=1" });
-  await new Promise((r) => setTimeout(r, 350));
+  await navigate("?empty=1");
   assert.equal(
     await evaluate(
       `document.body.textContent.includes('Bring a conversation into Paseo')`,
