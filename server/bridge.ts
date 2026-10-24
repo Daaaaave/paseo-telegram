@@ -27,6 +27,7 @@ import { refreshLinkedAgent } from "./agents.ts";
 import { GroupSetup } from "./group-setup.ts";
 import { groupAccessText, groupInviteUrl } from "../shared/group-setup.ts";
 import { Approvals } from "./approvals.ts";
+import { TaskMessages } from "./messages.ts";
 
 const FALLBACK =
   "The task needs attention in Paseo. Check its chat before sending the request again.";
@@ -54,6 +55,7 @@ export class Bridge {
   readonly router: Router;
   readonly groupSetup: GroupSetup;
   readonly approvals: Approvals;
+  readonly messages: TaskMessages;
   private readonly connection: () => Connection;
   private readonly queue: AgentQueue;
   constructor(
@@ -70,9 +72,10 @@ export class Bridge {
     this.connection = connection;
     this.queue = queue;
     this.groupSetup = new GroupSetup(telegram, store, connection, this.signal);
+    this.messages = new TaskMessages(telegram, store, this.signal);
     this.approvals = new Approvals({
       telegram, store, api: router.api, queue, connection,
-      signal: this.signal, setMode, authorized: (message) => this.authorized(message),
+      signal: this.signal, setMode, messages: this.messages, authorized: (message) => this.authorized(message),
     });
   }
   get queued() {
@@ -137,6 +140,7 @@ export class Bridge {
       ...(this.lifetime ? [this.lifetime] : []),
       ...this.tasks.values(),
     ]);
+    await this.messages.settle();
   }
   async followContinuation(previous: string, id: string): Promise<void> {
     for (const [key, current] of Object.entries(this.store.state.agents))
@@ -186,12 +190,29 @@ export class Bridge {
       return;
     }
     for (const [id, job] of Object.entries(this.store.state.jobs)) {
-      if (canResumeFinalEdit(job)) delete job.delivery;
+      if (canResumeFinalEdit(job) && job.message) {
+        job.finalReply ??= { mode: "legacy-edit", messageIds: [], replyToMessageId: job.message.message_id };
+        job.finalReply.sending = false;
+        delete job.delivery;
+        await this.store.save();
+      } else if (job.delivery === "sending") {
+        if (job.finalReply?.mode === "new" && !job.finalReply.sending)
+          delete job.delivery;
+        else job.delivery = "uncertain";
+        await this.store.save();
+      }
+      // Old permission cards have confirmed ownership; old progress may be the final answer.
+      if (job.temporaryMessageIds === undefined && job.approval?.messageId)
+        await this.messages.track(job, job.approval.messageId);
+      else await this.messages.cleanup(job);
+      await this.linkAcknowledgement(job);
       if (job.message && !job.delivery)
         void this.enqueue(Number(id), job.message);
     }
     while (!this.signal.aborted) {
       try {
+        for (const job of Object.values(this.store.state.jobs))
+          void this.messages.cleanup(job).catch(() => {});
         await this.reconcilePendingGroups();
         await this.groupSetup.refresh();
         const updates = await this.telegram.call<TelegramUpdate[]>(
@@ -213,6 +234,7 @@ export class Bridge {
               const job = this.store.state.jobs[key];
               return (
                 !!job.delivery &&
+                (!job.temporaryMessageIds?.length || job.cleanup?.abandoned || !!job.failure || job.delivery !== "done") &&
                 (!job.question || job.question.status === "answered")
               );
             })
@@ -585,6 +607,8 @@ export class Bridge {
     }
     const progress = this.progressFor(updateId, message);
     await progress.ensure();
+    if (job.finalReply?.mode !== "legacy-edit" && job.progress?.messageId)
+      await this.messages.track(job, job.progress.messageId);
     progress.start();
     if (!job.answer) {
       try {
@@ -606,30 +630,14 @@ export class Bridge {
       return;
     }
     await progress.stop();
+    job.finalReply ??= {
+      mode: "new", messageIds: [], replyToMessageId: message.message_id,
+      service: job.questionReply?.continuesInPlace === true,
+    };
     job.delivery = "sending";
     await this.store.save();
     try {
-      const [first, ...rest] = formatReply(job.answer || FALLBACK);
-      let lastMessageId = await progress.finish(first.text, first.entities);
-      for (const content of rest) {
-        const sent = await this.telegram.call<{ message_id: number }>(
-          "sendMessage",
-          {
-            chat_id: message.chat.id,
-            ...content,
-            ...(message.message_thread_id
-              ? { message_thread_id: message.message_thread_id }
-              : {}),
-            reply_parameters: {
-              message_id: message.message_id,
-              allow_sending_without_reply: true,
-            },
-            link_preview_options: { is_disabled: true },
-          },
-          this.signal,
-        );
-        lastMessageId = sent.message_id;
-      }
+      const lastMessageId = await this.messages.final(job, message, (first) => progress.finish(first.text, first.entities));
       if (
         job.question &&
         !job.question.messageId &&
@@ -645,6 +653,20 @@ export class Bridge {
     }
     delete job.message;
     await this.store.save();
+    if (job.delivery === "done") {
+      await this.linkAcknowledgement(job);
+      await this.messages.cleanup(job);
+    }
+  }
+  private async linkAcknowledgement(job: Job): Promise<void> {
+    if (job.delivery !== "done" || !job.finalReply?.service || !job.questionReply || job.questionReply.acknowledgementLinked) return;
+    const source = this.store.state.jobs[job.questionReply.sourceJobId];
+    if (source?.destination && job.destination &&
+        source.destination.chatId === job.destination.chatId && source.destination.topicId === job.destination.topicId) {
+      for (const id of job.finalReply.messageIds) await this.messages.track(source, id);
+      job.questionReply.acknowledgementLinked = true;
+      await this.store.save();
+    }
   }
   private async answer(
     message: TelegramMessage,

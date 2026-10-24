@@ -36,6 +36,11 @@ routes without deleting earlier agents.
 - `Approvals` owns permission cards and control responses. It uses a separate
   per-agent control queue, so decisions can unblock the task holding the normal
   agent/conversation queues. Native mode changes use the existing local SDK client.
+- `TaskMessages` owns final delivery receipts and task-scoped temporary bot
+  message IDs. Finals are new replies to their original Telegram requests.
+  Cleanup runs only after every final part is confirmed and the task succeeds.
+  Late service confirmations and clarification acknowledgements follow the
+  source task's cleanup lifecycle. Questions and user answers are retained.
 - `GroupSetup` reads `getMe` and `getChatMember` on startup, about once a minute
   during polling, and on explicit checks or membership changes. Unverified or
   failed checks never claim group readiness. Membership updates take precedence
@@ -121,9 +126,21 @@ its exact namespaced message ID back to its saved timeline boundary. Changed,
 missing or unprovable history requires operator attention instead of replaying
 an operation.
 
-A completed single-chunk final edit can be retried idempotently. An uncertain
-new send or multi-part delivery is not automatically resent. This intentionally
-prefers a visible delivery issue over duplicate code/deployment execution.
+Each final chunk has a persisted send boundary and its confirmed Telegram ID.
+A reload resumes only unsent parts after a confirmed chunk boundary. A send
+with an unknown outcome is not repeated, and its temporary messages remain.
+Older interrupted single-chunk final edits retain their idempotent recovery;
+already-delivered in-place answers are never treated as temporary progress.
+
+Temporary message IDs come only from confirmed sends or authenticated card
+callbacks. Cleanup uses `deleteMessages` in batches of at most 100 IDs, with
+chat-wide pacing and bounded persisted retries. It never derives IDs from chat
+ranges. Requests, native questions, final replies and older in-place answers
+are protected. Successful cleanup removes only its acknowledged IDs, so a late
+confirmation is not lost when it arrives during a sweep. A completed task's
+cleanup can resume after reload without sending its final answer again.
+Expired messages, revoked deletion rights and exhausted retries are left visible;
+cleanup failure does not change a confirmed delivery into an agent failure.
 
 ## Authorization boundaries
 

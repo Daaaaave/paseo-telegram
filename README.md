@@ -183,8 +183,12 @@ answers, even in a full-access chat. All connector-owned messages use English.
 ## While an agent works
 
 - One editable message shows elapsed time, public progress and activity.
-- The final answer replaces the progress message; long answers continue in
-  additional messages.
+- The final answer is a new reply to the original request at the bottom of the
+  conversation. Long answers keep their formatting across multiple messages.
+- Once every final part is confirmed delivered, the plugin removes that task's
+  progress, approval card and service confirmations. Questions, people's replies
+  and final answers remain. Message IDs are recorded per task; cleanup never
+  scans or deletes a range of chat history.
 - Bold, italic, code, links, quotes and lists use Telegram's native entities.
   Tables become labeled records that fit narrow screens.
 - Requests are serialized per conversation and shared agent. Different agents
@@ -194,12 +198,17 @@ answers, even in a full-access chat. All connector-owned messages use English.
 - Replies to questions are matched to the exact chat, topic and original form.
   They reach the native question form immediately, without waiting behind the
   task they are meant to unblock. If that task is still running, the reply gets
-  an acknowledgement and the task's original progress message receives the final
-  answer. Replies to questions from completed tasks wait for their new result.
+  an acknowledgement, removed after the original task's final answer arrives.
+  Replies to questions from completed tasks wait for their new result.
 - Questions already outstanding before a new request are not reposted under it.
   Their original Telegram messages remain replyable; a repeated answer does not
   create another agent prompt.
 - Telegram write pacing and `retry_after` backoff apply across a chat's topics.
+- Confirmed final parts and pending cleanup survive receiver reloads. Uncertain
+  new sends are never automatically repeated, and cleanup waits for a confirmed
+  complete delivery. Failed tasks keep their diagnostic messages. Deletion is
+  best effort: Telegram's 48-hour limit or missing permissions can leave old
+  service messages visible; deletion failures never resend the answer.
 
 Private reasoning and tool arguments/output are excluded from progress updates.
 All connector-generated service messages are English, including setup, progress,

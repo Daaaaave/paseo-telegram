@@ -46,10 +46,11 @@ export function publicProgress(text: string): string {
   return [...clean].slice(0, 700).join("").trim();
 }
 
-/** Repeating an edit is idempotent; repeating an uncertain new message is not. */
+/** Legacy receipts only: repeating an edit is idempotent, a new send is not. */
 export function canResumeFinalEdit(job: Job): boolean {
   return (
     job.delivery === "sending" &&
+    job.finalReply?.mode !== "new" &&
     Boolean(job.progress?.messageId) &&
     !job.progress?.replacementAttempted &&
     Boolean(job.answer) &&
@@ -255,6 +256,7 @@ export class ProgressMessage {
     this.dispose();
     await this.inFlight;
   }
+  /** Only interrupted pre-0.3.1 deliveries still replace the old progress. */
   async finish(
     firstChunk: string,
     entities: TextEntity[] = [],

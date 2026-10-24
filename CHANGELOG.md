@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1
+
+- Send final answers as new replies at the bottom of the Telegram conversation.
+  Remove task-owned progress, permission cards and service confirmations after
+  every final part is confirmed delivered; retain questions and people's replies.
+- Persist per-part final receipts and cleanup retries. Resume confirmed delivery
+  boundaries after reload without repeating uncertain sends, preserve older
+  in-place final answers, and handle late clarification acknowledgements.
+- Keep diagnostic messages for failed or uncertain tasks. Deletion failures never
+  fail or resend a confirmed final answer.
+
 ## 0.3.0
 
 - Approve native agent permissions directly in Telegram with one updating card:

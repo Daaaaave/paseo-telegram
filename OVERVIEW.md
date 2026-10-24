@@ -30,6 +30,11 @@ open app is required. Requests reach the chosen Paseo agent's provider; its
 public progress and final answer return to the original Telegram conversation.
 Private reasoning and raw tool output are not forwarded.
 
+Final answers arrive as new replies at the bottom. Once all parts are delivered,
+the task's working status, permission card and service confirmations disappear.
+Questions and people's replies stay in the conversation. Cleanup and confirmed
+delivery boundaries survive plugin reloads; uncertain sends are never repeated.
+
 Telegram requests use the chosen Paseo agent's tools and permissions. This
 connector does not supply a model subscription or grant additional tools.
 

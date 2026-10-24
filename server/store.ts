@@ -64,6 +64,7 @@ export interface Job {
     attempted?: boolean;
     followUpAfter?: { epoch: string; seq: number };
     continuesInPlace?: boolean;
+    acknowledgementLinked?: boolean;
   };
   sync?: SyncReport;
   failure?: "agent_request_failed" | "agent_error" | "missing_final_answer";
@@ -74,6 +75,15 @@ export interface Job {
     replacementAttempted?: boolean;
   };
   delivery?: "sending" | "done" | "uncertain" | "canceled";
+  finalReply?: {
+    mode: "new" | "legacy-edit";
+    messageIds: number[];
+    replyToMessageId: number;
+    sending?: boolean;
+    service?: boolean;
+  };
+  temporaryMessageIds?: number[];
+  cleanup?: { attempts: number; retryAt: number; abandoned?: boolean };
 }
 const jobSchema: z.ZodType<Job> = z.object({
   message: z
@@ -120,6 +130,7 @@ const jobSchema: z.ZodType<Job> = z.object({
         .object({ epoch: z.string(), seq: z.number() })
         .optional(),
       continuesInPlace: z.boolean().optional(),
+      acknowledgementLinked: z.boolean().optional(),
     })
     .optional(),
   sync: z
@@ -142,6 +153,23 @@ const jobSchema: z.ZodType<Job> = z.object({
     })
     .optional(),
   delivery: z.enum(["sending", "done", "uncertain", "canceled"]).optional(),
+  finalReply: z
+    .object({
+      mode: z.enum(["new", "legacy-edit"]),
+      messageIds: z.array(z.number().int().safe().positive()),
+      replyToMessageId: z.number().int().safe(),
+      sending: z.boolean().optional(),
+      service: z.boolean().optional(),
+    })
+    .optional(),
+  temporaryMessageIds: z.array(z.number().int().safe().positive()).optional(),
+  cleanup: z
+    .object({
+      attempts: z.number().int().nonnegative(),
+      retryAt: z.number(),
+      abandoned: z.boolean().optional(),
+    })
+    .optional(),
 });
 const groupSchema = z.object({
   title: z.string(),

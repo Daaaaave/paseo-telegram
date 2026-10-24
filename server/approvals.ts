@@ -6,6 +6,7 @@ import type { Job, Store } from "./store.ts";
 import type { AgentQueue } from "./routing.ts";
 import { publicProgress } from "./progress.ts";
 import { TelegramError, type Telegram } from "./telegram.ts";
+import { TaskMessages } from "./messages.ts";
 
 type Agent = ReturnType<PaseoApi["agents"]["ref"]>;
 type Snapshot = NonNullable<Awaited<ReturnType<Agent["refresh"]>>>;
@@ -111,12 +112,15 @@ interface Options {
   authorized(message: TelegramMessage): Promise<boolean>;
   signal: AbortSignal;
   setMode?: (agentId: string, modeId: string) => Promise<unknown>;
+  messages?: TaskMessages;
 }
 
 export class Approvals {
   private readonly options: Options;
+  private readonly messages: TaskMessages;
   constructor(options: Options) {
     this.options = options;
+    this.messages = options.messages ?? new TaskMessages(options.telegram, options.store, options.signal);
   }
 
   private actorAllowed(
@@ -283,6 +287,7 @@ export class Approvals {
         );
         card.messageId = sent.message_id;
         await this.options.store.save();
+        await this.messages.track(job, sent.message_id);
       }
     } catch (error) {
       if (
@@ -383,6 +388,7 @@ export class Approvals {
       // An authenticated Telegram callback proves an uncertain initial send's ID.
       job.approval!.messageId ??= query.message!.message_id;
       await this.options.store.save();
+      await this.messages.track(job, job.approval!.messageId!);
       const text = await this.apply(
         job,
         match[1],
@@ -465,18 +471,7 @@ export class Approvals {
   }
 
   private async reply(job: Job, text: string): Promise<void> {
-    if (!job.destination) return;
-    await this.options.telegram.call(
-      "sendMessage",
-      {
-        chat_id: job.destination.chatId,
-        text,
-        ...(job.destination.topicId
-          ? { message_thread_id: job.destination.topicId }
-          : {}),
-      },
-      this.options.signal,
-    );
+    await this.messages.notice(job, text);
   }
 
   private async apply(

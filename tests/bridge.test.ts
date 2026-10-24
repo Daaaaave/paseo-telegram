@@ -17,6 +17,7 @@ import { Bridge, findDispatch, messageIdentity } from "../server/bridge.ts";
 import { Router, AgentQueue, routeIdentity } from "../server/routing.ts";
 import { BotsAdapter } from "../server/bots.ts";
 import { Telegram } from "../server/telegram.ts";
+import { formatReply } from "../server/format.ts";
 import { authorized } from "../server/policy.ts";
 import { localTarget } from "../server/daemon.ts";
 
@@ -76,6 +77,7 @@ class Recorder extends Telegram {
       } as T;
     if (method === "getChatMember") return this.membership as T;
     if (method === "getWebhookInfo") return { url: "" } as T;
+    if (method === "deleteMessages") return true as T;
     if (method === "getUpdates")
       return await new Promise<T>((_resolve, reject) =>
         signal?.addEventListener("abort", () => reject(new Error("stopped")), {
@@ -956,6 +958,10 @@ test("a clarification reply unblocks its running task without waiting behind it"
     assert.equal(f.sent.length, 1, "the answer uses the native question RPC, not a second prompt");
     assert.equal(f.store.state.jobs[1].answer, "Here is the example");
     assert.match(f.store.state.jobs[2].answer!, /Answer received/);
+    const deleted = f.telegram.calls.filter(c => c.method === "deleteMessages").flatMap(c => c.payload.message_ids as number[]);
+    assert.ok(deleted.includes(f.store.state.jobs[2].finalReply!.messageIds[0]), "the control acknowledgement belongs to the original task's temporary messages");
+    assert.ok(!deleted.includes(formId), "the meaningful clarification stays in history");
+    assert.ok(!deleted.includes(102), "the person's answer stays in history");
   } finally { await f.bridge.stop(); await running; }
 });
 
@@ -1275,7 +1281,91 @@ test("Telegram approvals release the waiting task without finalizing a notice or
     assert.equal(f.responses.length, 2); assert.equal(f.sent.length, 1);
     assert.equal(job.answer, "Actual passenger report"); assert.equal(job.delivery, "done");
     assert.equal(job.approval!.closed, true);
+    const final = f.telegram.calls.find(call => call.method === "sendMessage" && call.payload.text === "Actual passenger report");
+    assert.ok(final, "the final answer is a new message, not a progress edit");
+    assert.deepEqual(final.payload.reply_parameters, { message_id: message().message_id, allow_sending_without_reply: true });
+    const deleted = f.telegram.calls.filter(call => call.method === "deleteMessages").flatMap(call => call.payload.message_ids as number[]);
+    assert.ok(deleted.includes(job.progress!.messageId!)); assert.ok(deleted.includes(job.approval!.messageId!));
+    assert.ok(job.finalReply!.messageIds.every(id => !deleted.includes(id)));
   } finally { await f.bridge.stop(); await running; }
+});
+
+test("reload resumes confirmed final chunk boundaries without replaying native work or delivered chunks", async () => {
+  for (const alreadySent of [0, 1, 2]) {
+    const f = await fixture();
+    const answer = "Chunked final. ".repeat(450), chunks = formatReply(answer);
+    assert.equal(chunks.length, 2);
+    f.store.state.jobs[1] = {
+      message: message(), destination: { chatId: -100, topicId: 0 }, answer, delivery: "sending",
+      progress: { startedAt: 0, attempted: true, messageId: 500 }, temporaryMessageIds: [500],
+      finalReply: { mode: "new", messageIds: [501, 502].slice(0, alreadySent), replyToMessageId: message().message_id, sending: false },
+    };
+    f.bridge.start();
+    try {
+      await until(() => f.store.state.jobs[1].delivery === "done" && f.bridge.queued === 0);
+      assert.equal(f.sent.length, 0);
+      const sent = f.telegram.calls.filter(c => c.method === "sendMessage");
+      assert.equal(sent.length, chunks.length - alreadySent);
+      if (sent.length) assert.equal(sent[0].payload.text, chunks[alreadySent].text);
+      assert.deepEqual(f.telegram.calls.filter(c => c.method === "deleteMessages").flatMap(c => c.payload.message_ids as number[]), [500]);
+    } finally { await f.bridge.stop(); }
+  }
+});
+
+test("reload never treats a new unconfirmed final send as an idempotent legacy edit", async () => {
+  const f = await fixture();
+  f.store.state.jobs[1] = {
+    message: message(), destination: { chatId: -100, topicId: 0 }, answer: "Unknown delivery", delivery: "sending",
+    progress: { startedAt: 0, attempted: true, messageId: 500 }, temporaryMessageIds: [500],
+    finalReply: { mode: "new", messageIds: [], replyToMessageId: message().message_id, sending: true },
+  };
+  f.bridge.start();
+  try {
+    await until(() => f.store.state.jobs[1].delivery === "uncertain");
+    assert.equal(f.sent.length, 0);
+    assert.equal(f.telegram.calls.some(c => ["sendMessage", "editMessageText", "deleteMessages"].includes(c.method)), false);
+  } finally { await f.bridge.stop(); }
+});
+
+test("an interrupted legacy final edit remains idempotent and cleanup never deletes that answer", async () => {
+  const f = await fixture();
+  f.store.state.jobs[1] = {
+    message: message(), destination: { chatId: -100, topicId: 0 }, answer: "Recovered old answer", delivery: "sending",
+    progress: { startedAt: 0, attempted: true, messageId: 500 }, temporaryMessageIds: [501],
+  };
+  f.bridge.start();
+  try {
+    await until(() => f.store.state.jobs[1].delivery === "done" && f.bridge.queued === 0);
+    assert.equal(f.sent.length, 0);
+    assert.equal(f.telegram.calls.some(c => c.method === "sendMessage"), false);
+    assert.ok(f.telegram.calls.some(c => c.method === "editMessageText" && c.payload.message_id === 500 && c.payload.text === "Recovered old answer"));
+    assert.deepEqual(f.telegram.calls.filter(c => c.method === "deleteMessages").flatMap(c => c.payload.message_ids as number[]), [501]);
+  } finally { await f.bridge.stop(); }
+});
+
+test("reload recovers a clarification acknowledgement committed before it was linked to the completed source task", async () => {
+  const f = await fixture();
+  f.store.state.jobs[1] = {
+    destination: { chatId: -100, topicId: 0 }, answer: "Actual answer", delivery: "done", temporaryMessageIds: [],
+    finalReply: { mode: "new", messageIds: [500], replyToMessageId: 100 },
+    question: { requestId: "q", fields: [], status: "answered", messageId: 501 },
+  };
+  f.store.state.jobs[2] = {
+    destination: { chatId: -100, topicId: 0 }, answer: "Answer received", delivery: "done", temporaryMessageIds: [],
+    finalReply: { mode: "new", messageIds: [502], replyToMessageId: 101, service: true },
+    questionReply: { sourceJobId: "1", answers: {}, continuesInPlace: true },
+  };
+  f.bridge.start();
+  try {
+    await until(() => f.telegram.calls.some(c => c.method === "deleteMessages"));
+    await f.bridge.messages.settle();
+    assert.deepEqual(f.telegram.calls.filter(c => c.method === "deleteMessages").flatMap(c => c.payload.message_ids as number[]), [502]);
+    assert.equal(f.telegram.calls.some(c => c.method === "sendMessage"), false);
+    assert.equal(f.sent.length, 0);
+    await f.bridge.stop();
+    const saved = new Store(f.root); await saved.load();
+    assert.equal(saved.state.jobs[2].questionReply?.acknowledgementLinked, true, "a completed ownership transfer is durable and does not restart cleanup on every reload");
+  } finally { await f.bridge.stop(); }
 });
 
 test("a reloaded receiver resumes a pending approval and delivers a decision made in Paseo", async () => {
