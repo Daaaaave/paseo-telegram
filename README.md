@@ -140,9 +140,45 @@ choice.
 Requests run with the linked agent's ordinary tools, credentials and permissions.
 Separate histories and Git branches do not isolate the host's filesystem or
 credentials. Choose the Paseo permission mode to match the people allowed to
-send requests. The connector does not automatically approve tool or plan
-permissions; those remain in Paseo. Native clarification questions can be
-answered in Telegram by replying with an option number or free text.
+send requests. Native clarification questions can be answered in Telegram by
+replying with an option number or free text.
+
+## Permissions and approvals
+
+For workspace routes, **Permissions** configures newly created agents. Select
+**Full access** (Claude `bypassPermissions`, or the provider's equivalent) if
+these chats should run without routine tool prompts. Existing chats retain their
+own permission mode and history when the profile changes.
+
+When an agent needs approval, the original request stays attached. A single
+English **Approval required** card lists its pending actions and updates as they
+change. The paired owner and users listed in **Approval Telegram user IDs** can:
+
+- **Allow all once**: answer only the requests listed on this card.
+- **Always allow these tools**: use the provider's offered remembered grants for
+  these exact tools, when supported. These grants use local project or session
+  settings, not a plugin-wide auto-approval rule.
+- **Deny all**: reject the listed requests.
+- **Grant full access**: switch this existing chat to its supported full-access
+  mode while preserving history, then release its unambiguous waiting tool calls.
+  Providers can apply mode changes from the next turn; remaining native choices
+  stay on the card. This does not change the bot's profile for future chats.
+- Choose individual native actions when the provider offers multiple choices.
+
+Reply to the exact card with `/approve` (or `/approve_all`), `/always_allow`,
+`/deny`, or `/full_access` to use the same controls without pressing a button.
+Unrelated text such as "allow it" is not interpreted as approval.
+
+Approval authority is separate from permission to ask questions or Telegram
+administrator status. Cards are bound to their bot, chat, topic, message, agent
+and exact native request. Changed, completed and copied cards cannot approve
+other work. Native requests are rechecked before responding. An unconfirmed
+permission RPC is not replayed automatically, including after reload.
+
+Decisions in Paseo also resume the original request. After all required choices
+are resolved, the final answer returns to its original Telegram conversation;
+the model prompt is not sent again. Native questions still require their actual
+answers, even in a full-access chat. All connector-owned messages use English.
 
 ## While an agent works
 

@@ -32,6 +32,12 @@ export interface Membership {
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: {
+    id: string;
+    from: TelegramUser;
+    data?: string;
+    message?: TelegramMessage;
+  };
   my_chat_member?: {
     chat: TelegramChat;
     from: TelegramUser;

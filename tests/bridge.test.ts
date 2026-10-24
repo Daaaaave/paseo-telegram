@@ -1226,3 +1226,88 @@ test("a new admitted group receives an English repair link while commands still 
   );
   assert.equal(f.bridge.groupSetup.access("-300"), "ready");
 });
+
+async function waitingFixture() {
+  const f = await fixture(config({ kind: "agent", agentId: "waiting", sharedHistory: false }));
+  const agent = f.api.agents.ref("waiting");
+  let pending = ["passengers", "statistics"].map((id) => ({
+    id, provider: "claude", kind: "tool", name: `mcp__reports__${id}`, input: { sql: "SELECT 1" },
+  }));
+  let waits = 0;
+  const responses: unknown[] = [];
+  const snapshot = () => ({
+    id: "waiting", provider: "claude", currentModeId: "default",
+    availableModes: [{ id: "bypassPermissions", label: "Bypass" }],
+    status: f.sent.length && pending.length ? "running" : "idle",
+    activeTurn: f.sent.length && pending.length ? { turnId: "turn" } : null,
+    pendingPermissions: f.sent.length ? pending : [],
+  });
+  agent.refresh = async () => ({ agent: snapshot() }) as never;
+  agent.respondToPermission = async (value) => {
+    responses.push(value);
+    pending = pending.filter((request) => request.id !== value.requestId);
+  };
+  f.setWait(async () => {
+    waits++;
+    return { status: pending.length ? "permission" : "idle", final: snapshot(),
+      lastMessage: pending.length ? "Waiting" : "Actual passenger report", error: null };
+  });
+  return { ...f, responses, resolveExternally: () => { pending = []; }, waits: () => waits };
+}
+async function until(check: () => boolean) {
+  for (let n = 0; n < 200 && !check(); n++) await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(check(), "condition must become true");
+}
+
+test("Telegram approvals release the waiting task without finalizing a notice or sending a second model prompt", async () => {
+  const f = await waitingFixture();
+  const running = f.bridge.handle({ update_id: 1, message: message() });
+  try {
+    await until(() => !!f.store.state.jobs[1]?.approval?.messageId);
+    const job = f.store.state.jobs[1];
+    assert.equal(job.delivery, undefined); assert.equal(job.answer, undefined);
+    assert.ok(job.message, "the original Telegram message must survive while waiting");
+    await f.bridge.handle({ update_id: 2, callback_query: {
+      id: "callback", from: { id: 10 }, data: `pa:${job.approval!.token}:once`,
+      message: { ...message(), message_id: job.approval!.messageId!, from: { id: 77 } },
+    } });
+    await running;
+    assert.equal(f.responses.length, 2); assert.equal(f.sent.length, 1);
+    assert.equal(job.answer, "Actual passenger report"); assert.equal(job.delivery, "done");
+    assert.equal(job.approval!.closed, true);
+  } finally { await f.bridge.stop(); await running; }
+});
+
+test("a reloaded receiver resumes a pending approval and delivers a decision made in Paseo", async () => {
+  const f = await waitingFixture();
+  const running = f.bridge.handle({ update_id: 1, message: message() });
+  await until(() => !!f.store.state.jobs[1]?.approval?.messageId);
+  const originalCard = f.store.state.jobs[1].approval!.messageId;
+  await f.bridge.stop(); await running;
+  const store = new Store(f.root); await store.load();
+  const router = new Router(f.api, new BotsAdapter(async () => assert.fail("not used"), null), store, () => f.connection);
+  const receiver = new Bridge(f.telegram, store, router, () => f.connection, new AgentQueue());
+  const priorWaits = f.waits();
+  receiver.start();
+  try {
+    await until(() => f.waits() > priorWaits);
+    assert.equal(store.state.jobs[1].approval!.messageId, originalCard);
+    f.resolveExternally();
+    await until(() => store.state.jobs[1].delivery === "done");
+    assert.equal(store.state.jobs[1].answer, "Actual passenger report");
+    assert.equal(f.sent.length, 1); assert.equal(f.responses.length, 0);
+    assert.equal(f.telegram.calls.filter((call) => call.method === "sendMessage" && String(call.payload.text).startsWith("Approval required")).length, 1);
+  } finally { await receiver.stop(); }
+});
+
+test("new agent permissions come from the bot profile and later profile edits preserve its existing conversation", async () => {
+  const connection = config();
+  if (connection.target?.kind !== "workspace" || connection.target.profile.kind !== "custom") assert.fail();
+  connection.target.profile.modeId = "bypassPermissions";
+  const f = await fixture(connection);
+  await f.bridge.handle({ update_id: 1, message: message() });
+  assert.equal((f.created[0].config as any).modeId, "bypassPermissions");
+  connection.target.profile.modeId = "default";
+  await f.bridge.handle({ update_id: 2, message: message() });
+  assert.equal(f.created.length, 1); assert.equal(f.sent[0].id, f.sent[1].id);
+});

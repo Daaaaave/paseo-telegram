@@ -139,6 +139,7 @@ export class Manager {
         router,
         () => this.registry.get(config.id),
         this.queue,
+        this.daemon.setMode,
       );
       this.bridges.set(config.id, bridge);
       this.errors.delete(config.id);
@@ -243,8 +244,9 @@ export class Manager {
       Connection,
       "id" | "name" | "enabled" | "target" | "bindings" | "revision"
     > & {
-      policy: Omit<Connection["policy"], "groupAdmission"> & {
+      policy: Omit<Connection["policy"], "groupAdmission" | "approvers"> & {
         groupAdmission?: Connection["policy"]["groupAdmission"];
+        approvers?: Connection["policy"]["approvers"];
       };
     },
   ): Promise<Connection> {

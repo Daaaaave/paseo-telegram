@@ -195,12 +195,16 @@ export function RouteEditor({
               {!!provider && (
                 <SettingsSelect
                   label="Permissions"
+                  hint="Used when creating new chats. Full access skips tool approval prompts; existing chats keep their current setting."
                   value={custom.modeId ?? ""}
                   options={[
                     { value: "", label: "Provider default" },
                     ...(selectedProvider?.modes ?? []).map((value) => ({
                       value: value.id,
-                      label: value.label,
+                      label:
+                        value.id === "bypassPermissions"
+                          ? "Full access"
+                          : value.label,
                     })),
                   ]}
                   onValueChange={(value) =>

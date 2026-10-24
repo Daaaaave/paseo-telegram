@@ -65,6 +65,7 @@ export const policySchema = z
       .enum(["operators", "admins", "everyone"])
       .default("operators"),
     operators: z.array(telegramIdSchema).max(100).default([]),
+    approvers: z.array(telegramIdSchema.positive()).max(100).default([]),
     invocation: z.enum(["mentions", "all"]).default("mentions"),
   })
   .strict();

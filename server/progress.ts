@@ -38,7 +38,7 @@ export function publicProgress(text: string): string {
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
     .replace(/^\s*(?:---\s*)+/g, "");
   if (
-    /(?:token|password|secret|authorization|api[_ -]?key|токен|пароль)\s*[:=]|\b(?:sk-|glpat-|ghp_|github_pat_)|\b\d{6,}:[\w-]+|\bBearer\s|https?:\/\/[^\s/]+:[^\s/@]+@/i.test(
+    /(?:token|password|secret|authorization|credential|cookie|private[_ -]?key|api[_ -]?key|токен|пароль)["']?\s*[:=]|\b(?:sk-|glpat-|ghp_|github_pat_|npm_)|\b\d{6,}:[\w-]+|\bBearer\s|BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY|https?:\/\/[^\s/]+:[^\s/@]+@/i.test(
       clean,
     )
   )

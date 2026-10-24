@@ -33,6 +33,17 @@ Private reasoning and raw tool output are not forwarded.
 Telegram requests use the chosen Paseo agent's tools and permissions. This
 connector does not supply a model subscription or grant additional tools.
 
+## Approvals in Telegram
+
+Pending agent permissions appear in one updating English card. The owner and
+separately designated approvers can allow once, remember the provider's exact
+tool grants, deny, or **Grant full access** to that chat while preserving its
+history. Reply commands provide the same controls. The original task keeps
+waiting and returns its final answer after approval in Telegram or Paseo.
+
+Workspace profiles can select **Full access** for newly created agents.
+Permission to ask the bot questions does not grant authority to approve actions.
+
 ## Group access
 
 Choose who can connect groups: the owner, the owner and allowed users, anyone,

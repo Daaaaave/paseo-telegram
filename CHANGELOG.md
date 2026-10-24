@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- Approve native agent permissions directly in Telegram with one updating card:
+  allow once, remember exact tool grants, deny, individual native choices, and
+  **Grant full access** for the same chat without losing its history.
+- Add separate approval user IDs and reply commands. Bind cards to their exact
+  Telegram context, agent and native requests; reject stale/cross-context actions
+  and preserve native response receipts across reloads.
+- Keep tasks waiting through permission prompts and resume their final reply
+  after approval in either Telegram or Paseo, without resending their prompt.
+- Clarify permission defaults for new chats and redact JSON credentials and
+  private-key headers from public previews.
+
 ## 0.2.4
 
 - Add an **Add to group** link to settings and owner confirmation, requesting

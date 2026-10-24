@@ -121,6 +121,12 @@ try {
     );
     await wait();
   };
+  const fill = async (label, value) => {
+    await evaluate(
+      `(()=>{const e=document.querySelector('input[aria-label=${JSON.stringify(label)}]');if(!e)throw Error('Missing input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()`,
+    );
+    await wait();
+  };
   await send("Runtime.enable");
   await send("Emulation.setDeviceMetricsOverride", {
     width: 1200,
@@ -167,6 +173,40 @@ try {
   );
   await select("Send Telegram messages to", "workspace");
   await select("Workspace", "backend");
+  await select("Provider", "example");
+  await select("Model", "model");
+  await select("Permissions", "bypassPermissions");
+  assert.match(await text(), /Full access skips tool approval prompts/);
+  await click("Save settings");
+  assert.equal(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.save').at(-1).input.target.profile.modeId`,
+    ),
+    "bypassPermissions",
+  );
+  await fill("Approval Telegram user IDs", "20, 30");
+  await click("Save settings");
+  assert.deepEqual(
+    await evaluate(
+      `globalThis.__calls.filter(c=>c.name==='telegram.save').at(-1).input.policy.approvers`,
+    ),
+    [20, 30],
+  );
+  await fill("Approval Telegram user IDs", "invalid");
+  assert.match(await text(), /Enter up to 100 positive Telegram user IDs/);
+  assert.equal(
+    await evaluate(
+      `document.querySelector('[aria-label="Save settings"]').getAttribute('aria-disabled')`,
+    ),
+    "true",
+  );
+  await click("Discard edits");
+  assert.equal(
+    await evaluate(
+      `document.querySelector('input[aria-label="Approval Telegram user IDs"]').value`,
+    ),
+    "20, 30",
+  );
   await select("Settings for new agents", "bots");
   await select("Bots profile", "support");
   await click("Save settings");

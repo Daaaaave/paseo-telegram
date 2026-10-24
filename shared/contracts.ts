@@ -78,9 +78,15 @@ export const saveRpc = defineRpc({
       name: z.string().trim().min(1).max(80),
       enabled: z.boolean(),
       target: targetSchema.nullable(),
-      policy: policySchema.omit({ groupAdmission: true }).extend({
-        groupAdmission: groupAdmissionSchema.optional(),
-      }),
+      policy: policySchema
+        .omit({ groupAdmission: true, approvers: true })
+        .extend({
+          groupAdmission: groupAdmissionSchema.optional(),
+          approvers: z
+            .array(z.number().int().safe().positive())
+            .max(100)
+            .optional(),
+        }),
       bindings: z.record(z.string().regex(/^-?\d+:\d+$/), targetSchema),
     })
     .strict(),

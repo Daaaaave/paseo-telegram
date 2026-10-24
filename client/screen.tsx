@@ -499,11 +499,15 @@ function ConnectionEditor({
   const [operators, setOperators] = useState(
     connection.config.policy.operators.join(", "),
   );
+  const [approvers, setApprovers] = useState(
+    connection.config.policy.approvers?.join(", ") ?? "",
+  );
   const [confirmRemove, setConfirmRemove] = useState(false);
   useEffect(() => {
     if (!dirty) {
       setDraft(connection.config);
       setOperators(connection.config.policy.operators.join(", "));
+      setApprovers(connection.config.policy.approvers?.join(", ") ?? "");
     }
   }, [connection.config.revision, dirty]);
   useEffect(() => {
@@ -521,6 +525,15 @@ function ConnectionEditor({
     .filter(Boolean)
     .every(
       (value) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)),
+    );
+  const approverIds = approvers.split(/[\s,]+/).filter(Boolean);
+  const validApprovers =
+    approverIds.length <= 100 &&
+    approverIds.every(
+      (value) =>
+        /^\d+$/.test(value) &&
+        Number.isSafeInteger(Number(value)) &&
+        Number(value) > 0,
     );
   const validation = connectionSchema.safeParse(draft);
   const complete =
@@ -1020,6 +1033,40 @@ function ConnectionEditor({
             ]}
             onValueChange={(invocation) => policy({ invocation })}
           />
+          <Field
+            theme={theme}
+            label="Approval Telegram user IDs"
+            value={approvers}
+            placeholder="Numeric user IDs, separated by commas"
+            hint="The owner can always approve. These additional users can allow or deny actions and grant full access to a linked chat from Telegram. Permission to ask questions does not grant approval authority."
+            error={
+              !validApprovers
+                ? "Enter up to 100 positive Telegram user IDs."
+                : undefined
+            }
+            onChange={(value) => {
+              setApprovers(value);
+              if (
+                value.split(/[\s,]+/).filter(Boolean).length <= 100 &&
+                value
+                  .split(/[\s,]+/)
+                  .filter(Boolean)
+                  .every(
+                    (part) =>
+                      /^\d+$/.test(part) &&
+                      Number.isSafeInteger(Number(part)) &&
+                      Number(part) > 0,
+                  )
+              )
+                policy({
+                  approvers: value
+                    .split(/[\s,]+/)
+                    .filter(Boolean)
+                    .map(Number),
+                });
+              else setDirty(true);
+            }}
+          />
           <Text
             style={{
               color: theme.colors.foregroundMuted,
@@ -1027,9 +1074,10 @@ function ConnectionEditor({
               lineHeight: 19,
             }}
           >
-            Requests use the linked agent’s tools and permissions. For ordinary
-            group mentions, disable Group Privacy in BotFather before adding the
-            bot. Inline Mode is not needed.
+            Requests use the linked agent’s tools and permissions. Approval
+            cards stay in the original Telegram conversation, and the task
+            continues after a decision here or in Paseo. Group setup above
+            checks whether mentions can reach the bot.
           </Text>
         </View>
       </SettingsSection>
@@ -1126,6 +1174,7 @@ function ConnectionEditor({
             busy ||
             !complete ||
             !validOperators ||
+            !validApprovers ||
             draft.revision !== connection.config.revision
           }
           onPress={() =>
@@ -1155,6 +1204,9 @@ function ConnectionEditor({
             onPress={() => {
               setDraft(connection.config);
               setOperators(connection.config.policy.operators.join(", "));
+              setApprovers(
+                connection.config.policy.approvers?.join(", ") ?? "",
+              );
               setDirty(false);
               setError(null);
             }}

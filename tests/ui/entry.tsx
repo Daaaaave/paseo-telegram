@@ -27,6 +27,7 @@ const connection = {
       directMessages: "owner",
       groupUsers: "operators",
       operators: [],
+      approvers: [],
       invocation: "mentions",
     },
     bindings: {},
@@ -92,7 +93,7 @@ const choices = {
       models: [{ id: "model", label: "Example model", thinking: [] }],
       modes: [
         { id: "review", label: "Ask for approval" },
-        { id: "full", label: "Full access" },
+        { id: "bypassPermissions", label: "Bypass" },
       ],
     },
   ],

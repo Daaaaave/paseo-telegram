@@ -33,6 +33,9 @@ routes without deleting earlier agents.
 - `Registry` validates configuration, serializes writes and checks revisions.
   It stores tokens separately and never returns them through list/settings RPCs.
 - Each `Bridge` owns a bot's polling, admission, jobs, progress and deliveries.
+- `Approvals` owns permission cards and control responses. It uses a separate
+  per-agent control queue, so decisions can unblock the task holding the normal
+  agent/conversation queues. Native mode changes use the existing local SDK client.
 - `GroupSetup` reads `getMe` and `getChatMember` on startup, about once a minute
   during polling, and on explicit checks or membership changes. Unverified or
   failed checks never claim group readiness. Membership updates take precedence
@@ -63,6 +66,31 @@ creator entry; operator IDs do not bypass this requirement. Lookup failures
 deny access. Authorization runs before dispatch and again after queuing,
 before clarification responses and before final delivery. Admission changes do
 not implicitly revoke existing groups or stop native agents already running.
+
+Approval authority is a separate owner/approver allowlist. Older save payloads
+omit the new field rather than resetting it. Telegram callbacks and reply
+commands must match the saved bot/chat/topic/message/agent and random card
+token. Native request fingerprints include identity, input, actions and
+suggestions. A fresh pending snapshot is checked before each response, and
+authorization is rechecked after receipt persistence. Receipts record the
+native agent, request, deciding actor and attempt outcome before the RPC.
+Uncertain responses never replay, and a continuation cannot reuse an older
+agent's card. Callback acknowledgements precede native operations.
+
+Remembered grants accept only native allow-rule suggestions for the exact tool
+and local project/session destination. They cannot implicitly change modes or
+grant unrelated tools. Full-access mode is a separate explicit action for the
+existing chat; changing a profile still affects only newly created agents.
+Question forms keep their own answer protocol and are never answered by a tool
+approval. Multiple native action choices remain explicit.
+
+Permission attention is nonterminal when the bridge owns the task. It keeps
+the original Telegram message and dispatched native request attached across
+receiver reloads. Approvals resolved from either client resume observation;
+only a real terminal result is delivered as the final answer. The task's model
+prompt is never resent to recover a pending approval. Initial card sends use
+at-most-once receipts; an authenticated callback can prove an uncertain send's
+message ID. Card edits are idempotent, and closed/stale buttons fail closed.
 
 Connector-owned service strings use English only. User input, public agent
 commentary, native question content and final answers are transported without
@@ -107,7 +135,7 @@ prefers a visible delivery issue over duplicate code/deployment execution.
 | Request sender            | Owner/operator/everyone policy enforced before agent access and again after queuing.                |
 | Conversation history      | Per chat/topic routes; global guard requires explicit shared-history opt-in for existing agents.    |
 | Clarification answer      | Original form, agent, question message, chat and topic must match.                                  |
-| Permissions               | Only native question forms are answered from Telegram. Tool/plan approvals remain in Paseo.         |
+| Permissions               | Explicit owner/approver decisions, native request fingerprints and persisted response receipts.     |
 | Credentials               | Server-only token files; sanitized API errors; public progress excludes credential-like strings.    |
 | External content          | A Telegram request is user input. Quoted third-party content is explicitly identified as untrusted. |
 

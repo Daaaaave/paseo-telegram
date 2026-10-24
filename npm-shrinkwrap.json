@@ -1,12 +1,12 @@
 {
   "name": "paseo-telegram",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "paseo-telegram",
-      "version": "0.2.4",
+      "version": "0.3.0",
       "license": "MIT",
       "dependencies": {
         "@getpaseo/client": "0.11.2",

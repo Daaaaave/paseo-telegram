@@ -114,6 +114,30 @@ test("blocking questions and real permission requests return attention without b
   }
 });
 
+test("an approval handler keeps a tool permission attached until the original task finishes", async () => {
+  let calls = 0, notices = 0;
+  const agent = { waitForFinish: async () => ({
+    status: ++calls < 3 ? "permission" : "idle",
+    final: { status: calls < 3 ? "running" : "idle", activeTurn: calls < 3 ? {} : null,
+      pendingPermissions: calls < 3 ? [{ ...permission, kind: "tool", name: "sql" }] : [] },
+    lastMessage: calls < 3 ? "Waiting" : "Final report",
+  }) } as unknown as Parameters<typeof waitForTask>[0];
+  const result = await waitForTask(agent, new AbortController().signal, async () => {}, undefined, new Set(), async (requests) => {
+    assert.equal(requests[0].name, "sql"); notices++;
+  });
+  assert.equal(result.status, "idle"); assert.equal(result.lastMessage, "Final report"); assert.equal(notices, 2);
+});
+
+test("a permission attention event without its native details cannot finalize the task", async () => {
+  let calls = 0;
+  const agent = { waitForFinish: async () => ++calls === 1
+    ? { status: "permission", final: { status: "running", pendingPermissions: [] } }
+    : { status: "idle", lastMessage: "Final answer", final: { status: "idle", pendingPermissions: [] } },
+  } as unknown as Parameters<typeof waitForTask>[0];
+  const result = await waitForTask(agent, new AbortController().signal, async () => {}, undefined, new Set(), async () => {});
+  assert.equal(result.status, "idle"); assert.equal(result.lastMessage, "Final answer");
+});
+
 test("an async answer waits for its scheduled follow-up instead of returning the previous final answer", async () => {
   let calls = 0;
   let pauses = 0;

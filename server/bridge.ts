@@ -26,6 +26,7 @@ import { syncIncompleteReply, syncIsComplete } from "./sync.ts";
 import { refreshLinkedAgent } from "./agents.ts";
 import { GroupSetup } from "./group-setup.ts";
 import { groupAccessText, groupInviteUrl } from "../shared/group-setup.ts";
+import { Approvals } from "./approvals.ts";
 
 const FALLBACK =
   "The task needs attention in Paseo. Check its chat before sending the request again.";
@@ -52,6 +53,7 @@ export class Bridge {
   readonly store: Store;
   readonly router: Router;
   readonly groupSetup: GroupSetup;
+  readonly approvals: Approvals;
   private readonly connection: () => Connection;
   private readonly queue: AgentQueue;
   constructor(
@@ -60,6 +62,7 @@ export class Bridge {
     router: Router,
     connection: () => Connection,
     queue: AgentQueue,
+    setMode?: (agentId: string, modeId: string) => Promise<unknown>,
   ) {
     this.telegram = telegram;
     this.store = store;
@@ -67,6 +70,10 @@ export class Bridge {
     this.connection = connection;
     this.queue = queue;
     this.groupSetup = new GroupSetup(telegram, store, connection, this.signal);
+    this.approvals = new Approvals({
+      telegram, store, api: router.api, queue, connection,
+      signal: this.signal, setMode, authorized: (message) => this.authorized(message),
+    });
   }
   get queued() {
     return this.tasks.size;
@@ -193,7 +200,7 @@ export class Bridge {
             offset: this.store.state.offset,
             timeout: 25,
             limit: 20,
-            allowed_updates: ["message", "my_chat_member"],
+            allowed_updates: ["message", "my_chat_member", "callback_query"],
           },
           this.signal,
         );
@@ -324,6 +331,10 @@ export class Bridge {
   async handle(update: TelegramUpdate, background = false): Promise<void> {
     const config = this.connection();
     if (!config.enabled) return;
+    if (update.callback_query) {
+      await this.approvals.callback(update.callback_query);
+      return;
+    }
     const state = this.store.state;
     const membership = update.my_chat_member;
     if (membership && isGroup(membership.chat)) {
@@ -415,6 +426,7 @@ export class Bridge {
       return;
     }
     if (!message.text?.trim() || message.text.length > 12_000) return;
+    if (await this.approvals.command(message)) return;
     const setupCommand = /^\/(?:start|status)(?:@(\w+))?(?:\s|$)/i.exec(
       message.text ?? "",
     );
@@ -778,7 +790,7 @@ export class Bridge {
           throw new RoutingError("The linked Paseo chat is unavailable.");
         if (
           current.agent.pendingPermissions?.some(
-            (value) => value.name !== "request_user_input_async",
+            (value) => value.kind === "question" && value.name !== "request_user_input_async",
           )
         )
           throw new RoutingError(
@@ -786,10 +798,13 @@ export class Bridge {
           );
         if (
           current.agent.activeTurn ||
+          current.agent.pendingPermissions?.some((request) => request.kind !== "question") ||
           current.agent.status === "running" ||
           current.agent.status === "initializing"
         ) {
-          const previous = await waitForTask(agent, this.signal);
+          const previous = await this.waitOnAgent(job, message, id, new Set(
+            current.agent.pendingPermissions?.filter((value) => value.kind === "question").map((value) => value.id),
+          ));
           if (previous.status === "permission")
             throw new RoutingError(
               "The linked chat is waiting for a permission. Resolve it in Paseo, then send the message again.",
@@ -829,45 +844,7 @@ export class Bridge {
     const priorQuestions = new Set(job.priorQuestionIds);
     for (let switches = 0; switches < 3; switches++) {
       await progress.watch(api.agents.ref(id));
-      const result = await waitForTask(
-        api.agents.ref(id),
-        this.signal,
-        undefined,
-        async (question) => {
-          if (
-            job.question?.requestId === question.requestId &&
-            job.question.notificationAttempted
-          )
-            return;
-          job.question = { ...question, notificationAttempted: true };
-          await this.store.save();
-          try {
-            for (const content of formatReply(questionText(question))) {
-              const sent = await this.telegram.call<{ message_id: number }>(
-                "sendMessage",
-                {
-                  chat_id: message.chat.id,
-                  ...content,
-                  ...(message.message_thread_id
-                    ? { message_thread_id: message.message_thread_id }
-                    : {}),
-                  reply_parameters: {
-                    message_id: message.message_id,
-                    allow_sending_without_reply: true,
-                  },
-                  link_preview_options: { is_disabled: true },
-                },
-                this.signal,
-              );
-              job.question.messageId = sent.message_id;
-            }
-            await this.store.save();
-          } catch {
-            /* The final response still includes a question not confirmed by Telegram. */
-          }
-        },
-        priorQuestions,
-      );
+      const result = await this.waitOnAgent(job, message, id, priorQuestions);
       const question = result.final?.pendingPermissions
         ?.filter((request) => !priorQuestions.has(request.id))
         ?.map(questionFrom)
@@ -908,6 +885,34 @@ export class Bridge {
       id = job.agentId!;
     }
     return FALLBACK;
+  }
+  private async waitOnAgent(job: Job, message: TelegramMessage, id: string, priorQuestions: ReadonlySet<string>) {
+    const result = await waitForTask(this.router.api.agents.ref(id), this.signal, undefined,
+      async (question) => {
+        if (job.question?.requestId === question.requestId && job.question.notificationAttempted) return;
+        job.question = { ...question, notificationAttempted: true };
+        await this.store.save();
+        try {
+          for (const content of formatReply(questionText(question))) {
+            const sent = await this.telegram.call<{ message_id: number }>("sendMessage", {
+              chat_id: message.chat.id, ...content,
+              ...(message.message_thread_id ? { message_thread_id: message.message_thread_id } : {}),
+              reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+              link_preview_options: { is_disabled: true },
+            }, this.signal);
+            job.question.messageId = sent.message_id;
+          }
+          await this.store.save();
+        } catch { /* A final response still includes a question not confirmed by Telegram. */ }
+      }, priorQuestions,
+      async (requests) => {
+        if (!(await this.authorized(message))) throw new RoutingError("This conversation is no longer authorized.");
+        try { await this.approvals.show(job, requests); }
+        catch { this.lastError = "The approval card could not be confirmed by Telegram. The task is still waiting for a decision."; }
+      },
+    );
+    if (result.status !== "permission") await this.approvals.show(job, []);
+    return result;
   }
 }
 class RoutingError extends Error {}

@@ -42,6 +42,7 @@ export interface DaemonConnection {
   api: PaseoApi;
   invoke: PluginInvoker;
   serverId: string | null;
+  setMode?: (agentId: string, modeId: string) => Promise<unknown>;
   close(): Promise<void>;
 }
 export async function connectLocalDaemon(
@@ -113,6 +114,7 @@ export async function connectLocalDaemon(
   return {
     api,
     serverId: lock.serverId ?? null,
+    setMode: (agentId, modeId) => client.setAgentMode(agentId, modeId),
     invoke: (plugin, method, input) =>
       client.invokePluginRpc(plugin, method, input),
     close: async () => {
