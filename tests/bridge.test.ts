@@ -5,6 +5,7 @@ import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { PaseoApi } from "@getpaseo/client";
+import { MediaInput } from "../server/media.ts";
 import {
   connectionSchema,
   type Connection,
@@ -195,7 +196,14 @@ async function fixture(
     null,
   );
   const router = new Router(sharedSdk.api, bots, store, () => connection);
-  const bridge = new Bridge(telegram, store, router, () => connection, queue);
+  const bridge = new Bridge(
+    telegram,
+    store,
+    router,
+    () => connection,
+    queue,
+    new MediaInput(root, telegram, { transcribe: async () => "" }),
+  );
   return { connection, store, telegram, router, bridge, root, ...sharedSdk };
 }
 
@@ -825,6 +833,7 @@ test("the global binding guard also prevents accidental sharing across separate 
     router,
     () => f.connection,
     new AgentQueue(),
+    new MediaInput(f.root, f.telegram, { transcribe: async () => "" }),
   );
   await bridge.handle({ update_id: 1, message: message() });
   assert.equal(f.sent.length, 0);

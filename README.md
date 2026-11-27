@@ -156,9 +156,45 @@ Private reasoning and tool arguments/output are excluded from progress updates.
 All connector-generated service messages are English, including setup, progress,
 clarification instructions and errors. User messages, agent commentary, question
 content and final answers keep their original language.
-This first release accepts text messages. Media input, voice transcription,
-channel posts and Telegram Business connections are not implemented. Images in
+Channel posts and Telegram Business connections are not implemented. Images in
 agent Markdown remain links; diagrams and formulas are not rendered to images.
+
+## Media input, reply buttons and delivery (this fork)
+
+Everything below follows the normal authorization rules: only the paired owner
+and allowed chats can trigger a download or a transcription.
+
+- **Voice messages and audio files** are downloaded, converted with `ffmpeg` and
+  transcribed locally with `whisper.cpp` (French and English, no cloud API, no
+  key). The agent receives the text prefixed `[Voice note, transcribed]`, and the
+  chat shows one short line `🎤 “…”` so mistakes can be caught. The recording is
+  deleted after transcription. Limits: 15 minutes, 20 MB.
+- **Photos and documents** (images, PDF, APK, zip, anything) are saved under
+  `<plugin data>/connections/<id>/media/<conversation>/<update>-<safe name>`,
+  outside any repository, and the agent receives the absolute path, the caption,
+  and a note that the content is untrusted data. Limit 20 MB (the Bot API
+  maximum); names are reduced to one safe path segment; files older than 14 days
+  are removed when the receiver starts.
+- **Reply buttons**: an agent ends its reply with `[buttons: OK push | Clore]`.
+  The marker is removed and the labels become inline buttons; a press is sent to
+  the agent as a normal message from the person who pressed it, and the keyboard
+  is removed. Scripts that post their own buttons can use `callback_data` =
+  `reply:<text>` (64 bytes max) to get the same behaviour.
+- **Failed final replies** are retried with backoff (2 s, 6 s, 15 s). A new message
+  is only retried when Telegram provably did not receive it, so nothing is posted
+  twice. If delivery still fails, the chat gets one short notice without the reply
+  text; the full answer stays in the linked Paseo chat.
+- **Calls**: Telegram bots cannot receive calls, so there is no call support.
+
+Transcription uses `ffmpeg`, `whisper-cli` and a ggml model. Defaults are
+`/opt/homebrew/bin/ffmpeg`, `/opt/homebrew/bin/whisper-cli` and
+`<plugin data>/models/ggml-large-v3-turbo.bin`; override with the environment
+variables `PASEO_TELEGRAM_FFMPEG`, `PASEO_TELEGRAM_WHISPER_CLI` and
+`PASEO_TELEGRAM_WHISPER_MODEL`. Without them, voice messages get a short
+"not set up" reply and other features keep working.
+
+Fork of paseo-telegram 0.2.3 (MIT). Development: `npm ci`, `npm run typecheck`,
+`npm test`.
 
 ## Optional Git synchronization
 

@@ -3,6 +3,7 @@ import type { TelegramMessage } from "../shared/telegram.ts";
 import type { Job } from "./store.ts";
 import { Telegram, TelegramError } from "./telegram.ts";
 import { formatReply, type TextEntity, type TelegramText } from "./format.ts";
+import { extractButtons, type InlineKeyboard } from "./buttons.ts";
 
 type Agent = ReturnType<PluginHookContext["paseo"]["agents"]["ref"]>;
 type Event = Parameters<
@@ -53,7 +54,7 @@ export function canResumeFinalEdit(job: Job): boolean {
     Boolean(job.progress?.messageId) &&
     !job.progress?.replacementAttempted &&
     Boolean(job.answer) &&
-    formatReply(job.answer!).length === 1
+    formatReply(extractButtons(job.answer!).text).length === 1
   );
 }
 
@@ -258,6 +259,7 @@ export class ProgressMessage {
   async finish(
     firstChunk: string,
     entities: TextEntity[] = [],
+    replyMarkup?: InlineKeyboard,
   ): Promise<number | undefined> {
     await this.stop();
     const id = this.job.progress?.messageId;
@@ -271,6 +273,7 @@ export class ProgressMessage {
             text: firstChunk,
             entities,
             link_preview_options: { is_disabled: true },
+            ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
           },
           this.signal,
         );
@@ -286,7 +289,10 @@ export class ProgressMessage {
     }
     const sent = await this.telegram.call<{ message_id: number }>(
       "sendMessage",
-      this.reply(firstChunk, entities),
+      {
+        ...this.reply(firstChunk, entities),
+        ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+      },
       this.signal,
     );
     return sent.message_id;
