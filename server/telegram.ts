@@ -1,17 +1,56 @@
+import { createWriteStream } from "node:fs";
+import { mkdir, rm } from "node:fs/promises";
+import { dirname } from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+export class FileTooLargeError extends Error {
+  constructor() {
+    super("File exceeds the size limit");
+  }
+}
+
 export class TelegramError extends Error {
   readonly code: number;
   readonly retryAfter?: number;
-  readonly reason?: "not_modified" | "uneditable";
+  readonly reason?: "not_modified" | "uneditable" | "too_big";
   constructor(
     code: number,
     retryAfter?: number,
-    reason?: "not_modified" | "uneditable",
+    reason?: "not_modified" | "uneditable" | "too_big",
   ) {
     super(`Telegram API error ${code}`);
     this.code = code;
     this.retryAfter = retryAfter;
     this.reason = reason;
   }
+}
+
+/** A request that produced no Telegram response. `unreachable` means the
+ * connection was never made, so nothing was sent; `uncertain` means the request
+ * may have been processed (timeout, reset), so a resend could duplicate it. */
+export class TelegramNetworkError extends Error {
+  readonly delivery: "unreachable" | "uncertain";
+  constructor(delivery: "unreachable" | "uncertain") {
+    super("Telegram connection unavailable");
+    this.delivery = delivery;
+  }
+}
+const UNREACHABLE = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+function networkError(error: unknown): TelegramNetworkError {
+  const code = (error as { cause?: { code?: unknown } } | undefined)?.cause
+    ?.code;
+  return new TelegramNetworkError(
+    typeof code === "string" && UNREACHABLE.has(code)
+      ? "unreachable"
+      : "uncertain",
+  );
 }
 
 export async function pause(ms: number, signal?: AbortSignal): Promise<void> {
@@ -89,12 +128,85 @@ export class TelegramOutbox {
 
 export class Telegram {
   private readonly readToken: () => Promise<string>;
+  private readonly fetcher: typeof fetch;
   constructor(
     readToken: () => Promise<string> = async () => {
       throw new Error("Telegram token is not configured");
     },
+    fetcher: typeof fetch = fetch,
   ) {
     this.readToken = readToken;
+    this.fetcher = fetcher;
+  }
+  private async token(): Promise<string> {
+    const token = (await this.readToken()).trim();
+    if (!/^\d+:[A-Za-z0-9_-]+$/.test(token))
+      throw new Error("Invalid Telegram token configuration");
+    return token;
+  }
+  /** Downloads a file received by the bot into `destination`, stopping as soon
+   * as it exceeds `maxBytes`. The token is only ever part of the request URL;
+   * no error produced here includes it. Returns the stored size in bytes. */
+  async downloadFile(
+    fileId: string,
+    destination: string,
+    maxBytes: number,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    const info = await this.call<{ file_path?: string; file_size?: number }>(
+      "getFile",
+      { file_id: fileId },
+      signal,
+    );
+    const path = info.file_path;
+    if (
+      !path ||
+      path.startsWith("/") ||
+      path.split("/").some((part) => part === ".." || part === "")
+    )
+      throw new Error("Telegram returned an invalid file path");
+    if ((info.file_size ?? 0) > maxBytes) throw new FileTooLargeError();
+    const token = await this.token();
+    let response: Response;
+    try {
+      response = await this.fetcher(
+        `https://api.telegram.org/file/bot${token}/${path
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}`,
+        {
+          signal: AbortSignal.any([
+            ...(signal ? [signal] : []),
+            AbortSignal.timeout(120_000),
+          ]),
+        },
+      );
+    } catch {
+      throw new Error("Telegram file download unavailable");
+    }
+    if (!response.ok || !response.body)
+      throw new Error("Telegram file download failed");
+    let size = 0;
+    const limit = new Transform({
+      transform(chunk: Buffer, _encoding, done) {
+        size += chunk.length;
+        done(size > maxBytes ? new FileTooLargeError() : null, chunk);
+      },
+    });
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    try {
+      await pipeline(
+        Readable.fromWeb(response.body as import("node:stream/web").ReadableStream),
+        limit,
+        createWriteStream(destination, { mode: 0o600, flags: "wx" }),
+      );
+    } catch (error) {
+      await rm(destination, { force: true });
+      throw error instanceof FileTooLargeError
+        ? error
+        : new Error("Telegram file download failed");
+    }
+    return size;
   }
   private readonly outbox = new TelegramOutbox();
   async call<T>(
@@ -119,12 +231,10 @@ export class Telegram {
     payload: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<T> {
-    const token = (await this.readToken()).trim();
-    if (!/^\d+:[A-Za-z0-9_-]+$/.test(token))
-      throw new Error("Invalid Telegram token configuration");
+    const token = await this.token();
     let response: Response;
     try {
-      response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      response = await this.fetcher(`https://api.telegram.org/bot${token}/${method}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
@@ -132,8 +242,8 @@ export class Telegram {
           ? AbortSignal.any([signal, AbortSignal.timeout(35_000)])
           : AbortSignal.timeout(35_000),
       });
-    } catch {
-      throw new Error("Telegram connection unavailable");
+    } catch (error) {
+      throw networkError(error);
     }
     const body = (await response.json()) as {
       ok: boolean;
@@ -145,7 +255,9 @@ export class Telegram {
     if (!response.ok || !body.ok) {
       const reason = /message is not modified/i.test(body.description ?? "")
         ? "not_modified"
-        : /message to edit not found|message can't be edited/i.test(
+        : /file is too big/i.test(body.description ?? "")
+          ? "too_big"
+          : /message to edit not found|message can't be edited/i.test(
               body.description ?? "",
             )
           ? "uneditable"

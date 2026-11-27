@@ -7,6 +7,8 @@ import type { Choices, ConnectionView } from "../shared/contracts.ts";
 import { Registry } from "./registry.ts";
 import { Store } from "./store.ts";
 import { Bridge } from "./bridge.ts";
+import { MediaInput } from "./media.ts";
+import { WhisperTranscriber } from "./transcribe.ts";
 import { Telegram, TelegramError, pause } from "./telegram.ts";
 import { isMember, type Membership } from "../shared/telegram.ts";
 import { Router, AgentQueue, isCurrentRoute } from "./routing.ts";
@@ -17,6 +19,7 @@ import { collectPages } from "./pages.ts";
 export class Manager {
   readonly registry: Registry;
   readonly bridges = new Map<string, Bridge>();
+  private readonly transcriber = new WhisperTranscriber();
   private readonly stores = new Map<string, Store>();
   private readonly errors = new Map<string, string>();
   private readonly queue = new AgentQueue();
@@ -139,6 +142,7 @@ export class Manager {
         router,
         () => this.registry.get(config.id),
         this.queue,
+        new MediaInput(store.root, telegram, this.transcriber),
       );
       this.bridges.set(config.id, bridge);
       this.errors.delete(config.id);

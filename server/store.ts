@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { TelegramMessage } from "../shared/telegram.ts";
 import { targetSchema } from "../shared/config.ts";
 import type { SyncReport } from "./sync.ts";
+import type { AgentInput } from "./media.ts";
 import { atomicWrite, readJson } from "./files.ts";
 
 const questionSchema = z.object({
@@ -46,6 +47,10 @@ export interface Job {
     replacementAttempted?: boolean;
   };
   delivery?: "sending" | "done" | "uncertain" | "canceled";
+  /** Prepared agent input of a media message, kept so a restart neither
+   * downloads nor transcribes it twice. */
+  input?: AgentInput;
+  echoed?: boolean;
 }
 const jobSchema: z.ZodType<Job> = z.object({
   message: z
@@ -103,6 +108,24 @@ const jobSchema: z.ZodType<Job> = z.object({
     })
     .optional(),
   delivery: z.enum(["sending", "done", "uncertain", "canceled"]).optional(),
+  input: z
+    .object({
+      text: z.string(),
+      transcribed: z.boolean().optional(),
+      attachments: z
+        .array(
+          z.object({
+            kind: z.enum(["photo", "document"]),
+            path: z.string(),
+            fileName: z.string(),
+            mimeType: z.string().optional(),
+            sizeBytes: z.number(),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
+  echoed: z.boolean().optional(),
 });
 const groupSchema = z.object({
   title: z.string(),
